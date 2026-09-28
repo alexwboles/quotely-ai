@@ -13,6 +13,7 @@
     items: [],
     photos: [],
     quotes: [],
+    quoteFilter: "",
     settings: loadSettings()
   };
 
@@ -25,21 +26,28 @@
     localStorage.setItem("quotely_settings", JSON.stringify(state.settings));
   }
 
-  /* ---------- tabs ---------- */
-  var tabs = document.querySelectorAll(".tab");
-  tabs.forEach(function (t) {
-    t.addEventListener("click", function () {
-      tabs.forEach(function (x) { x.classList.remove("active"); });
-      t.classList.add("active");
-      ["new", "quotes", "settings"].forEach(function (k) {
-        $("tab-" + k).classList.toggle("hidden", k !== t.dataset.tab);
-      });
-      var shown = $("tab-" + t.dataset.tab);
-      shown.classList.remove("view-enter");
-      void shown.offsetWidth;
-      shown.classList.add("view-enter");
-      if (t.dataset.tab === "quotes") loadQuotes();
+  /* ---------- sidebar nav ---------- */
+  var navItems = document.querySelectorAll(".nav-item");
+  function showView(name) {
+    navItems.forEach(function (x) { x.classList.toggle("active", x.dataset.view === name); });
+    ["dashboard", "new", "quotes", "settings"].forEach(function (k) {
+      $("view-" + k).classList.toggle("hidden", k !== name);
     });
+    var shown = $("view-" + name);
+    shown.classList.remove("view-enter");
+    void shown.offsetWidth;
+    shown.classList.add("view-enter");
+    if (name === "quotes" || name === "dashboard") loadQuotes();
+    window.scrollTo({ top: 0 });
+  }
+  navItems.forEach(function (t) {
+    t.addEventListener("click", function () { showView(t.dataset.view); });
+  });
+  document.querySelectorAll("[data-goto-new]").forEach(function (b) {
+    b.addEventListener("click", function () { showView("new"); });
+  });
+  document.querySelectorAll("[data-goto-quotes]").forEach(function (b) {
+    b.addEventListener("click", function () { showView("quotes"); });
   });
 
   /* ---------- trade selector ---------- */
@@ -482,6 +490,78 @@
     renderItems(); renderPreview();
   });
 
+  function renderDashboard() {
+    var qs = state.quotes;
+    var today = new Date().toISOString().slice(0, 10);
+    function totalsOf(x) { return (x.totals && Number(x.totals.total)) || 0; }
+    $("dashDate").textContent = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }) +
+      "  ·  " + qs.length + " quote" + (qs.length === 1 ? "" : "s") + " on the books";
+
+    var pipe = qs.filter(function (x) { return x.status === "draft" || x.status === "sent"; });
+    var pipeVal = pipe.reduce(function (a, x) { return a + totalsOf(x); }, 0);
+    $("kpiPipeline").textContent = money(pipeVal);
+    $("kpiPipelineSub").textContent = pipe.length + " open quote" + (pipe.length === 1 ? "" : "s") + " awaiting decision";
+
+    var won = qs.filter(function (x) { return x.status === "won"; }).length;
+    var lost = qs.filter(function (x) { return x.status === "lost"; }).length;
+    var decided = won + lost;
+    $("kpiWinRate").textContent = decided ? Math.round((won / decided) * 100) + "%" : "—";
+    $("kpiWinSub").textContent = decided ? won + " won · " + lost + " lost" : "no decided quotes yet";
+
+    $("kpiAvg").textContent = qs.length ? money(qs.reduce(function (a, x) { return a + totalsOf(x); }, 0) / qs.length) : "$0.00";
+    $("kpiAvgSub").textContent = qs.length ? "across " + qs.length + " quotes" : "no quotes yet";
+
+    var due = qs.filter(function (x) { return x.followUp && x.followUp <= today && (x.status === "draft" || x.status === "sent"); });
+    $("kpiFollow").textContent = due.length;
+    $("kpiFollowSub").textContent = due.length ? "reach out today" : "all caught up";
+
+    var order = ["draft", "sent", "won", "lost"];
+    var labels = { draft: "Draft", sent: "Sent", won: "Won", lost: "Lost" };
+    $("pipeGrid").innerHTML = "";
+    order.forEach(function (s) {
+      var grp = qs.filter(function (x) { return x.status === s; });
+      var val = grp.reduce(function (a, x) { return a + totalsOf(x); }, 0);
+      var cell = document.createElement("button");
+      cell.className = "pipe-cell";
+      cell.innerHTML = '<div class="pipe-status">' + labels[s] + '</div><div class="pipe-num">' + grp.length + '</div><div class="pipe-val">' + money(val) + "</div>";
+      cell.addEventListener("click", function () { setQuoteFilter(s); });
+      $("pipeGrid").appendChild(cell);
+    });
+
+    var recent = qs.slice().sort(function (a, b) { return String(b.createdAt || "").localeCompare(String(a.createdAt || "")); }).slice(0, 5);
+    var rb = $("recentBody");
+    rb.innerHTML = recent.length ? "" : '<tr class="empty-row"><td colspan="4">No quotes yet.</td></tr>';
+    recent.forEach(function (x) {
+      var tr = document.createElement("tr");
+      tr.innerHTML = '<td class="t-num">' + esc(x.number) + '</td><td class="t-cust">' + esc(x.customer || "—") + "</td>" +
+        '<td class="num t-num">' + money(totalsOf(x)) + '</td><td><span class="status ' + x.status + '">' + x.status + "</span></td>";
+      rb.appendChild(tr);
+    });
+
+    var fus = qs.filter(function (x) { return x.followUp && (x.status === "draft" || x.status === "sent"); })
+      .sort(function (a, b) { return String(a.followUp || "").localeCompare(String(b.followUp || "")); }).slice(0, 6);
+    var fl = $("followList");
+    fl.innerHTML = "";
+    if (!fus.length) { fl.innerHTML = '<div class="fu-empty">Nothing due — every quote has its follow-up handled.</div>'; return; }
+    fus.forEach(function (x) {
+      var cls = followUpClass(x.followUp);
+      var d = document.createElement("div");
+      d.className = "fu-item";
+      d.innerHTML = '<div><div class="fu-who">' + esc(x.customer || "No name") + '</div><div class="fu-what">' + esc(x.number) + "</div></div>" +
+        '<div class="' + (cls === "due" ? "fu-due" : cls === "soon" ? "fu-soon" : "fu-none") + '">' + esc(x.followUp) + "</div>";
+      fl.appendChild(d);
+    });
+  }
+
+  function setQuoteFilter(s) {
+    state.quoteFilter = s || "";
+    document.querySelectorAll("#statusPills .fpill").forEach(function (p) {
+      p.classList.toggle("active", p.dataset.status === (s || ""));
+    });
+    renderQuotesList();
+    showView("quotes");
+  }
+
   /* ---------- quotes list ---------- */
   async function loadQuotes() {
     try {
@@ -489,6 +569,7 @@
       state.quotes = r.ok ? await r.json() : [];
     } catch (e) { state.quotes = []; }
     renderQuotesList();
+    renderDashboard();
   }
 
   function followUpClass(dateStr) {
@@ -501,48 +582,61 @@
   }
 
   function renderQuotesList() {
-    var filter = $("statusFilter").value;
     var q = $("searchBox").value.toLowerCase();
+    var filter = state.quoteFilter;
     var list = state.quotes.filter(function (x) {
       if (filter && x.status !== filter) return false;
       if (q && (x.customer + " " + x.number).toLowerCase().indexOf(q) === -1) return false;
       return true;
     });
     $("quoteCount").textContent = state.quotes.length || "";
+    var names = ["draft", "sent", "won", "lost"];
+    $("quotesSub").textContent = state.quotes.length
+      ? state.quotes.length + " total  \u00b7  " + names.map(function (s) {
+          return state.quotes.filter(function (x) { return x.status === s; }).length + " " + s;
+        }).join("  \u00b7  ")
+      : "No quotes yet \u2014 create your first one.";
 
     var today = new Date().toISOString().slice(0, 10);
     var due = state.quotes.filter(function (x) {
       return x.followUp && x.followUp <= today && (x.status === "draft" || x.status === "sent");
     });
     $("followUpAlert").innerHTML = due.length
-      ? '<div class="alert">🔔 ' + due.length + " quote" + (due.length > 1 ? "s" : "") +
-        " need follow-up: " + due.map(function (x) { return esc(x.number + " (" + (x.customer || "no name") + ")"); }).join(", ") + "</div>"
+      ? '<div class="alert"><strong>' + due.length + " quote" + (due.length > 1 ? "s" : "") +
+        "</strong> need" + (due.length > 1 ? "" : "s") + " follow-up: " +
+        due.map(function (x) { return esc(x.number + " (" + (x.customer || "no name") + ")"); }).join(", ") + "</div>"
       : "";
 
-    $("quotesList").innerHTML = list.length ? "" : '<div class="hg-empty"><div class="hg-empty-title">No quotes yet</div><p>Describe your first job and generate a professional quote in seconds.</p><button class="primary" style="width:auto;margin-top:0" onclick="document.querySelector(\'.tab[data-tab=new]\').click()">Create your first quote</button></div>';
+    var tb = $("quotesList");
+    tb.innerHTML = "";
+    if (!list.length) {
+      tb.innerHTML = '<tr class="empty-row"><td colspan="7">No quotes match this filter.</td></tr>';
+      return;
+    }
     list.forEach(function (x) {
-      var div = document.createElement("div");
-      div.className = "quote-card";
+      var tr = document.createElement("tr");
+      var fuCls = followUpClass(x.followUp);
       var fu = x.followUp
-        ? '<div class="followup ' + followUpClass(x.followUp) + '">📅 follow up: ' + esc(x.followUp) + "</div>"
-        : "";
-      div.innerHTML =
-        '<div><div class="num">' + esc(x.number) + '</div><div class="cust">' + esc(x.customer || "—") + "</div>" +
-        '<div class="meta">' + esc(x.trade) + " · " + new Date(x.createdAt).toLocaleDateString() +
-        (x.photos && x.photos.length ? " · " + x.photos.length + " photo" + (x.photos.length > 1 ? "s" : "") : "") +
-        "</div>" + fu + "</div>" +
-        '<div><span class="status ' + x.status + '">' + x.status + '</span> <span class="total">' + money(x.totals.total) + "</span></div>" +
-        '<div class="qbtns">' +
-          (x.status !== "won" ? '<button class="small ghost" data-act="won">Won ✓</button>' : "") +
-          (x.status !== "lost" ? '<button class="small ghost" data-act="lost">Lost</button>' : "") +
-          (x.status === "won" || x.status === "lost" ? '<button class="small ghost" data-act="sent">Reopen</button>' : "") +
+        ? '<span class="' + (fuCls === "due" ? "fu-due" : fuCls === "soon" ? "fu-soon" : "fu-none") + '">' + esc(x.followUp) + "</span>"
+        : '<span class="fu-none">\u2014</span>';
+      tr.innerHTML =
+        '<td class="t-num">' + esc(x.number) + "</td>" +
+        '<td class="t-cust">' + esc(x.customer || "\u2014") + "</td>" +
+        '<td class="t-sub">' + esc(x.trade || "\u2014") + "</td>" +
+        '<td class="num t-num">' + money((x.totals && x.totals.total) || 0) + "</td>" +
+        '<td><span class="status ' + x.status + '">' + x.status + "</span></td>" +
+        "<td>" + fu + "</td>" +
+        '<td><div class="row-actions">' +
           (x.status === "draft" ? '<button class="small ghost" data-act="sent">Mark sent</button>' : "") +
+          (x.status !== "won" ? '<button class="small ghost" data-act="won">Won</button>' : "") +
+          (x.status !== "lost" ? '<button class="small ghost" data-act="lost">Lost</button>' : "") +
+          ((x.status === "won" || x.status === "lost") ? '<button class="small ghost" data-act="sent">Reopen</button>' : "") +
           '<button class="small danger-ghost" data-act="del">Delete</button>' +
-        "</div>";
-      div.querySelectorAll("[data-act]").forEach(function (b) {
+        "</div></td>";
+      tr.querySelectorAll("[data-act]").forEach(function (b) {
         b.addEventListener("click", function () { quoteAction(x.id, b.dataset.act); });
       });
-      $("quotesList").appendChild(div);
+      tb.appendChild(tr);
     });
   }
 
@@ -561,7 +655,14 @@
     } catch (e) { alert("Couldn't reach the server."); }
   }
 
-  $("statusFilter").addEventListener("change", renderQuotesList);
+  document.querySelectorAll("#statusPills .fpill").forEach(function (p) {
+    p.addEventListener("click", function () {
+      document.querySelectorAll("#statusPills .fpill").forEach(function (x) { x.classList.remove("active"); });
+      p.classList.add("active");
+      state.quoteFilter = p.dataset.status;
+      renderQuotesList();
+    });
+  });
   $("searchBox").addEventListener("input", renderQuotesList);
 
   /* ---------- settings ---------- */
@@ -597,18 +698,6 @@
   fillSettings();
   renderItems();
   renderPhotoGrid();
-  /* scroll reveal for the 01/02/03 steps */
-  var steps = document.querySelectorAll(".step");
-  if (reduceMotion || !("IntersectionObserver" in window)) {
-    steps.forEach(function (s) { s.classList.add("revealed"); });
-  } else {
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        if (e.isIntersecting) { e.target.classList.add("revealed"); io.unobserve(e.target); }
-      });
-    }, { threshold: 0.08 });
-    steps.forEach(function (s) { io.observe(s); });
-  }
-  loadQuotes().then(renderPreview);
+  loadQuotes().then(function () { renderDashboard(); renderPreview(); });
   renderPreview();
 })();
