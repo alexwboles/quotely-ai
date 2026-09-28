@@ -50,13 +50,15 @@
           </label>
           <div class="photos-block">
             <span class="photos-label">Job photos <span class="photos-count" id="photoCount"></span></span>
-            <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Add job photos">
-              <span class="dz-icon">+</span>
-              <span>Drop photos here or <u>browse</u> — they print on the quote sheet</span>
-              <input type="file" id="photoInput" accept="image/*" multiple hidden>
+            <div class="phototray">
+              <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Add job photos">
+                <span class="dz-icon">+</span>
+                <span>Drop site photos here or <u>browse</u> — they develop below, then print on the quote sheet</span>
+                <input type="file" id="photoInput" accept="image/*" multiple hidden>
+              </div>
+              <div class="photo-grid" id="photoGrid"></div>
             </div>
-            <div class="photo-grid" id="photoGrid"></div>
-            <p class="hint">Each photo is analyzed on your machine: size, dominant colors, and whether it's too dark or blurry to send. With your OpenAI key set, Quotely can also look at a photo and suggest line items.</p>
+            <p class="hint">Every photo is time-stamped and analyzed on your machine — size, dominant colors, dark/blurry warnings. With your OpenAI key set, AI look can describe a photo and suggest line items.</p>
           </div>
           <div class="row">
             <label>Customer name <input id="customer" placeholder="Jane Smith"></label>

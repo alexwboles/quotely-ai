@@ -91,7 +91,8 @@ function cleanPhotos(photos) {
     return {
       dataUrl: du,
       caption: String(p.caption || "").slice(0, 120),
-      tag: tag === "before" || tag === "after" ? tag : ""
+      tag: tag === "before" || tag === "after" ? tag : "",
+      addedAt: Math.max(0, Number(p.addedAt) || 0)
     };
   }).filter(Boolean);
 }

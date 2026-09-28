@@ -122,7 +122,7 @@
       if (state.photos.length >= 8) return;
       processImageFile(f).then(function (p) {
         if (state.photos.length >= 8) return;
-        var photo = { dataUrl: p.dataUrl, caption: "", tag: "", analysis: null, ai: null };
+        var photo = { dataUrl: p.dataUrl, caption: "", tag: "", addedAt: Date.now(), analysis: null, ai: null };
         state.photos.push(photo);
         renderPhotoGrid(); renderPreview();
         analyzeLocal(p.dataUrl).then(function (a) {
@@ -144,13 +144,31 @@
   });
   dz.addEventListener("drop", function (e) { addPhotoFiles(e.dataTransfer.files); });
 
+  function fmtTime(ts) {
+    if (!ts) return "";
+    var d = new Date(Number(ts));
+    var date = d.toLocaleString("en-US", { month: "short" }) + " " + d.getDate();
+    var time = d.toLocaleString("en-US", { hour: "numeric", minute: "2-digit" });
+    return (date + " · " + time).toUpperCase();
+  }
+
   function renderPhotoGrid() {
     var grid = $("photoGrid");
     $("photoCount").textContent = state.photos.length ? "(" + state.photos.length + "/8)" : "";
     grid.innerHTML = "";
+    if (!state.photos.length) {
+      grid.innerHTML =
+        '<div class="frame-empty" data-browse><span>+</span><em>FRAME 01</em></div>' +
+        '<div class="frame-empty" data-browse><span>+</span><em>FRAME 02</em></div>' +
+        '<div class="frame-empty" data-browse><span>+</span><em>FRAME 03</em></div>';
+      grid.querySelectorAll("[data-browse]").forEach(function (el) {
+        el.addEventListener("click", function () { photoInput.click(); });
+      });
+      return;
+    }
     state.photos.forEach(function (p, i) {
       var card = document.createElement("div");
-      card.className = "photo-card";
+      card.className = "photo-card" + (p.tag ? " tag-" + p.tag : "");
       var a = p.analysis;
       var flags = a && a.flags.length
         ? '<span class="flag warn">' + a.flags.join(" · ") + " — retake?</span>"
@@ -172,6 +190,8 @@
         aiBlock = '<div class="ai-panel warn">' + esc(p.aiError) + "</div>";
       }
       card.innerHTML =
+        '<div class="frame-head"><span class="frame-no">' + String(i + 1).padStart(2, "0") + '</span>' +
+        '<span class="frame-time">' + esc(fmtTime(p.addedAt)) + "</span></div>" +
         '<img src="' + p.dataUrl + '" alt="job photo">' +
         '<input class="cap" data-cap="' + i + '" placeholder="Caption…" value="' + esc(p.caption) + '">' +
         '<div class="photo-meta">' +
@@ -356,8 +376,9 @@
         ? '<div class="q-photos"><h4>Job photos</h4><div class="q-photos-grid">' +
           state.photos.map(function (p) {
             return "<figure><img src=\"" + p.dataUrl + "\" alt=\"job photo\">" +
-              ((p.caption || p.tag)
-                ? "<figcaption>" + (p.tag ? '<span class="ptag">' + esc(p.tag) + "</span> " : "") + esc(p.caption) + "</figcaption>"
+              ((p.caption || p.tag || p.addedAt)
+                ? "<figcaption>" + (p.tag ? '<span class="ptag">' + esc(p.tag) + "</span> " : "") + esc(p.caption) +
+                  (p.addedAt ? '<span class="ftime">' + esc(fmtTime(p.addedAt)) + "</span>" : "") + "</figcaption>"
                 : "") + "</figure>";
           }).join("") + "</div></div>"
         : "") +
@@ -386,7 +407,7 @@
       company: state.settings.companyName || "",
       customer: $("customer").value, phone: $("phone").value, email: $("email").value,
       trade: tradeSel.value, description: $("description").value,
-      items: state.items, photos: state.photos.map(function (p) { return { dataUrl: p.dataUrl, caption: p.caption, tag: p.tag }; }),
+      items: state.items, photos: state.photos.map(function (p) { return { dataUrl: p.dataUrl, caption: p.caption, tag: p.tag, addedAt: p.addedAt }; }),
       taxRate: $("taxRate").value, depositRate: $("depositRate").value,
       followUp: $("followUp").value, notes: $("notes").value, validDays: $("validDays").value
     };
@@ -532,6 +553,7 @@
   /* ---------- boot ---------- */
   fillSettings();
   renderItems();
+  renderPhotoGrid();
   loadQuotes().then(renderPreview);
   renderPreview();
 })();
