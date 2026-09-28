@@ -78,6 +78,24 @@ function cleanItems(items) {
     }));
 }
 
+/* Photos are embedded in the quote as downscaled data URLs (no extra files
+ * to orphan on delete). Client downscales to <=1280px JPEG before upload. */
+var PHOTO_RE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
+function cleanPhotos(photos) {
+  if (!Array.isArray(photos)) return [];
+  return photos.slice(0, 8).map(function (p) {
+    if (!p || typeof p.dataUrl !== "string") return null;
+    var du = p.dataUrl.slice(0, 1500000);
+    if (!PHOTO_RE.test(du)) return null;
+    var tag = String(p.tag || "");
+    return {
+      dataUrl: du,
+      caption: String(p.caption || "").slice(0, 120),
+      tag: tag === "before" || tag === "after" ? tag : ""
+    };
+  }).filter(Boolean);
+}
+
 /* ---------- optional OpenAI enhancement ---------- */
 function generateWithOpenAI(description, trade) {
   const key = process.env.OPENAI_API_KEY;
@@ -135,12 +153,13 @@ function sendJson(res, status, obj) {
   res.end(body);
 }
 
-function readBody(req) {
+function readBody(req, maxBytes) {
+  maxBytes = maxBytes || 1e6;
   return new Promise((resolve, reject) => {
     let body = "";
     req.on("data", c => {
       body += c;
-      if (body.length > 1e6) { req.destroy(); reject(new Error("body too large")); }
+      if (body.length > maxBytes) { req.destroy(); reject(new Error("body too large")); }
     });
     req.on("end", () => {
       if (!body) return resolve({});
@@ -170,7 +189,65 @@ async function handleApi(req, res) {
   const p = url.pathname;
 
   if (req.method === "GET" && p === "/api/health") {
-    return sendJson(res, 200, { ok: true, version: "0.1.0", openai: Boolean(process.env.OPENAI_API_KEY) });
+    return sendJson(res, 200, { ok: true, version: "0.2.0", openai: Boolean(process.env.OPENAI_API_KEY) });
+  }
+
+  /* Optional AI photo analysis (user's own key; never required). */
+  if (req.method === "POST" && p === "/api/analyze-photo") {
+    if (!process.env.OPENAI_API_KEY) {
+      return sendJson(res, 503, { error: "no-key", message: "Set OPENAI_API_KEY to enable AI photo analysis." });
+    }
+    const body = await readBody(req, 20e6);
+    const dataUrl = String(body.dataUrl || "");
+    if (!PHOTO_RE.test(dataUrl.slice(0, 1500000))) return sendJson(res, 400, { error: "invalid image" });
+    const payload = JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "You are a quoting assistant for tradespeople. Look at the job-site photo and reply with ONLY JSON: {\"observations\": string (2-3 sentences on the visible work needed), \"items\": [{\"description\": string, \"qty\": number, \"unit\": string, \"unitPrice\": number}]} with 2-5 realistic 2026 US-price line items."
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Trade: " + String(body.trade || "General Handyman") + ". What work does this photo show, and what should the quote include?" },
+            { type: "image_url", image_url: { url: dataUrl.slice(0, 1500000), detail: "low" } }
+          ]
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 800
+    });
+    const result = await new Promise((resolve) => {
+      const rq = https.request({
+        hostname: "api.openai.com",
+        path: "/v1/chat/completions",
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + process.env.OPENAI_API_KEY,
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload)
+        },
+        timeout: 30000
+      }, (rp) => {
+        let rb = "";
+        rp.on("data", c => { rb += c; });
+        rp.on("end", () => {
+          try {
+            const data = JSON.parse(rb);
+            const text = data.choices[0].message.content.trim().replace(/^```json|```$/g, "").trim();
+            const parsed = JSON.parse(text);
+            resolve({ observations: String(parsed.observations || ""), items: cleanItems(parsed.items) });
+          } catch (e) { resolve(null); }
+        });
+      });
+      rq.on("error", () => resolve(null));
+      rq.on("timeout", () => { rq.destroy(); resolve(null); });
+      rq.write(payload);
+      rq.end();
+    });
+    if (!result) return sendJson(res, 502, { error: "ai-failed", message: "AI analysis failed; try again." });
+    return sendJson(res, 200, result);
   }
 
   if (req.method === "POST" && p === "/api/generate") {
@@ -187,7 +264,7 @@ async function handleApi(req, res) {
   }
 
   if (req.method === "POST" && p === "/api/quotes") {
-    const body = await readBody(req);
+    const body = await readBody(req, 20e6);
     const quotes = readQuotes();
     const items = cleanItems(body.items);
     const totals = Quotely.quoteTotals(items, body.taxRate, body.depositRate);
@@ -205,6 +282,7 @@ async function handleApi(req, res) {
       trade: String(body.trade || "General Handyman").slice(0, 60),
       description: String(body.description || "").slice(0, 2000),
       items,
+      photos: cleanPhotos(body.photos),
       taxRate: Number(body.taxRate) || 0,
       depositRate: Number(body.depositRate) || 0,
       totals,
@@ -225,14 +303,16 @@ async function handleApi(req, res) {
     if (idx === -1) return sendJson(res, 404, { error: "quote not found" });
 
     if (req.method === "PUT") {
-      const body = await readBody(req);
+      const body = await readBody(req, 20e6);
       const q = quotes[idx];
-      const allowed = ["status", "followUp", "notes", "customer", "phone", "email", "company", "trade", "description", "taxRate", "depositRate", "validDays", "items"];
+      const allowed = ["status", "followUp", "notes", "customer", "phone", "email", "company", "trade", "description", "taxRate", "depositRate", "validDays", "items", "photos"];
       for (const k of allowed) {
         if (body[k] === undefined) continue;
         if (k === "items") {
           q.items = cleanItems(body.items);
           q.totals = Quotely.quoteTotals(q.items, q.taxRate, q.depositRate);
+        } else if (k === "photos") {
+          q.photos = cleanPhotos(body.photos);
         } else if (k === "taxRate" || k === "depositRate") {
           q[k] = Number(body[k]) || 0;
           q.totals = Quotely.quoteTotals(q.items, q.taxRate, q.depositRate);

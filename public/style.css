@@ -158,6 +158,71 @@ button.danger-ghost:hover { background: #fdf0f0; }
 button.small { padding: 7px 15px; font-size: 13.5px; min-height: 0; }
 .hint { color: var(--muted); font-size: 14px; }
 
+/* ---------- job photos ---------- */
+.photos-block { margin: 18px 0 6px; }
+.photos-label { font-weight: 700; font-size: 14px; display: block; margin-bottom: 8px; }
+.photos-count { color: var(--muted); font-weight: 600; }
+.dropzone {
+  border: 2px dashed #cdbb92; border-radius: 16px; padding: 22px; text-align: center;
+  background: rgba(255, 253, 248, .55); color: var(--muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 14.5px;
+  transition: border-color .15s, background .15s;
+}
+.dropzone:hover, .dropzone.drag { border-color: var(--copper); background: var(--copper-soft); color: var(--copper-deep); }
+.dropzone:focus-visible { outline: 2px solid var(--copper); outline-offset: 2px; }
+.dz-icon {
+  width: 34px; height: 34px; border-radius: 50%; background: var(--copper); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700; flex: none;
+}
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 18px; margin-top: 16px; }
+.photo-card {
+  background: #fff; border: 1px solid var(--line); border-radius: 4px;
+  padding: 10px 10px 12px; box-shadow: 0 10px 24px rgba(70, 45, 15, .14);
+  position: relative;
+}
+.photo-card:nth-child(odd) { transform: rotate(-1.1deg); }
+.photo-card:nth-child(even) { transform: rotate(.9deg); }
+.photo-card::before {
+  content: ""; position: absolute; top: -11px; left: 50%; width: 74px; height: 22px;
+  transform: translateX(-50%) rotate(-2deg); background: rgba(233, 196, 138, .6);
+  border-left: 1px dashed rgba(138, 61, 6, .3); border-right: 1px dashed rgba(138, 61, 6, .3);
+}
+.photo-card img { width: 100%; height: 150px; object-fit: cover; border-radius: 2px; display: block; background: #eee; }
+.photo-card .cap { margin-top: 8px; min-height: 36px; padding: 7px 10px; font-size: 13.5px; }
+.photo-meta { display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.tagrow { display: flex; gap: 4px; }
+.tag {
+  border: 1px solid var(--line); background: var(--paper); border-radius: 999px;
+  padding: 4px 10px; font-size: 12px; min-height: 0; font-weight: 600; color: var(--muted);
+}
+.tag.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.photo-analysis { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12.5px; color: var(--muted); flex-wrap: wrap; }
+.flag { font-weight: 700; }
+.flag.ok { color: var(--green); }
+.flag.warn { color: var(--red); }
+.dims { font-variant-numeric: tabular-nums; }
+.swatches { display: inline-flex; gap: 3px; }
+.swatch { width: 16px; height: 16px; border-radius: 50%; border: 1px solid rgba(0,0,0,.18); display: inline-block; }
+.ai-panel {
+  margin-top: 10px; font-size: 13.5px; background: var(--copper-soft);
+  border: 1px solid #ecd9b8; border-radius: 10px; padding: 10px 12px;
+}
+.ai-panel.warn { background: #fdf3e3; }
+.ai-items { margin: 8px 0; display: grid; gap: 4px; }
+.ai-items div { background: rgba(255,255,255,.7); border-radius: 8px; padding: 6px 10px; }
+
+/* photos printed on the quote sheet */
+.q-photos { margin-top: 26px; page-break-inside: avoid; }
+.q-photos h4 { margin: 0 0 10px; color: var(--muted); text-transform: uppercase; font-size: 12px; letter-spacing: 1.5px; font-family: var(--sans); }
+.q-photos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.q-photos figure { margin: 0; background: #fff; border: 1px solid var(--line); padding: 6px 6px 8px; }
+.q-photos img { width: 100%; height: 110px; object-fit: cover; display: block; }
+.q-photos figcaption { font-family: var(--sans); font-size: 12px; color: var(--muted); padding-top: 6px; }
+.ptag {
+  display: inline-block; background: var(--ink); color: #fff; border-radius: 999px;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; padding: 1px 8px; margin-right: 4px;
+}
+
 /* ---------- line items table ---------- */
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 15px; }

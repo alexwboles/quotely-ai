@@ -82,6 +82,17 @@ start_srv
 R6=$(curl -s "$BASE/api/quotes" | python3 -c "import json,sys; print(len(json.load(sys.stdin)))")
 [ "$R6" = "2" ] && ok "flow6: 2 quotes survive restart (data/quotes.json)" || bad "flow6: found $R6 quotes after restart"
 
+# ---- Flow 8: photos persist across restart ----
+PIX8="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+P8=$(curl -s -X POST "$BASE/api/quotes" -H 'Content-Type: application/json' \
+  -d "{\"customer\":\"Photo Persist\",\"trade\":\"Roofing\",\"items\":[{\"description\":\"x\",\"qty\":1,\"unit\":\"each\",\"unitPrice\":5}],\"photos\":[{\"dataUrl\":\"$PIX8\",\"caption\":\"Roof\",\"tag\":\"before\"}]}")
+ID8=$(echo "$P8" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+stop_srv
+start_srv
+C8=$(curl -s "$BASE/api/quotes" | python3 -c "import json,sys; d=json.load(sys.stdin); q=[x for x in d if x['id']=='$ID8'][0]; print(len(q['photos']), q['photos'][0]['caption'])")
+[ "$C8" = "1 Roof" ] && ok "flow8: photo persists across restart with caption" || bad "flow8: $C8"
+curl -s -X DELETE "$BASE/api/quotes/$ID8" >/dev/null
+
 # ---- Flow 7: delete cleans up ----
 curl -s -X DELETE "$BASE/api/quotes/$ID1" >/dev/null
 curl -s -X DELETE "$BASE/api/quotes/$ID2" >/dev/null

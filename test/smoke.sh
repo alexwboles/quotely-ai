@@ -77,5 +77,41 @@ T=$(curl -s "$BASE/")
 echo "$T" | grep -q '<title>Quotely AI' && ok "GET / serves index.html" || bad "index not served"
 curl -s "$BASE/style.css" | grep -q '@media print' && ok "print CSS present" || bad "no @media print"
 
+# 13. photos: save quote with photo (caption + tag kept, invalid rejected)
+PIX="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+QP=$(curl -s -X POST "$BASE/api/quotes" -H 'Content-Type: application/json' \
+  -d "{\"customer\":\"Photo Test\",\"trade\":\"Painting\",\"items\":[{\"description\":\"x\",\"qty\":1,\"unit\":\"each\",\"unitPrice\":10}],\"photos\":[{\"dataUrl\":\"$PIX\",\"caption\":\"Front wall\",\"tag\":\"before\"},{\"dataUrl\":\"not-a-data-url\",\"caption\":\"bad\"}]}")
+QPID=$(echo "$QP" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "$QP" | grep -q '"caption":"Front wall"' && echo "$QP" | grep -q '"tag":"before"' \
+  && ok "POST saves photo with caption + tag" || bad "photo not saved: ${QP:0:200}"
+echo "$QP" | grep -q 'not-a-data-url' && bad "invalid photo data URL accepted" || ok "invalid photo data URL rejected"
+echo "$QP" | grep -q '"photos":\[' && ok "quote carries photos array" || bad "no photos array: ${QP:0:200}"
+
+# 14. photo cap: 10 uploads -> 8 stored
+MANY=$(python3 -c "print(','.join(['{\"dataUrl\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==\"}']*10))")
+QC=$(curl -s -X POST "$BASE/api/quotes" -H 'Content-Type: application/json' \
+  -d "{\"customer\":\"Cap Test\",\"trade\":\"Painting\",\"items\":[{\"description\":\"x\",\"qty\":1,\"unit\":\"each\",\"unitPrice\":1}],\"photos\":[$MANY]}")
+CCOUNT=$(echo "$QC" | grep -o '"dataUrl"' | wc -l)
+[ "$CCOUNT" = "8" ] && ok "photo cap enforced (10 -> 8)" || bad "photo cap: stored $CCOUNT"
+QCID=$(echo "$QC" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+# 15. PUT photos replaces photo set
+UP=$(curl -s -X PUT "$BASE/api/quotes/$QPID" -H 'Content-Type: application/json' \
+  -d "{\"photos\":[{\"dataUrl\":\"$PIX\",\"tag\":\"after\"}]}")
+echo "$UP" | grep -q '"tag":"after"' && ok "PUT photos updates quote" || bad "PUT photos failed: ${UP:0:200}"
+
+# 16. analyze-photo without API key -> 503 no-key (never spends)
+AHTTP=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/analyze-photo" -H 'Content-Type: application/json' -d "{\"dataUrl\":\"$PIX\"}")
+ABODY=$(curl -s -X POST "$BASE/api/analyze-photo" -H 'Content-Type: application/json' -d "{\"dataUrl\":\"$PIX\"}")
+[ "$AHTTP" = "503" ] && echo "$ABODY" | grep -q '"error":"no-key"' \
+  && ok "analyze-photo without key -> 503 no-key" || bad "analyze-photo: http=$AHTTP body=${ABODY:0:120}"
+
+# 17. photo quotes cleaned up
+curl -s -X DELETE "$BASE/api/quotes/$QPID" >/dev/null
+curl -s -X DELETE "$BASE/api/quotes/$QCID" >/dev/null
+L3=$(curl -s "$BASE/api/quotes")
+! echo "$L3" | grep -q "$QPID" && ! echo "$L3" | grep -q "$QCID" \
+  && ok "photo test quotes deleted" || bad "photo cleanup failed"
+
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

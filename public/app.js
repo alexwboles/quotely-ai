@@ -11,6 +11,7 @@
 
   var state = {
     items: [],
+    photos: [],
     quotes: [],
     settings: loadSettings()
   };
@@ -44,6 +45,207 @@
     o.value = t; o.textContent = t;
     tradeSel.appendChild(o);
   });
+
+  /* ---------- job photos ---------- */
+  var dz = $("dropzone"), photoInput = $("photoInput");
+
+  function processImageFile(file) {
+    return new Promise(function (resolve, reject) {
+      if (!/^image\//.test(file.type)) return reject(new Error("not an image"));
+      var img = new Image();
+      var url = URL.createObjectURL(file);
+      img.onload = function () {
+        try {
+          var max = 1280;
+          var scale = Math.min(1, max / Math.max(img.width, img.height));
+          var w = Math.max(1, Math.round(img.width * scale));
+          var h = Math.max(1, Math.round(img.height * scale));
+          var c = document.createElement("canvas");
+          c.width = w; c.height = h;
+          c.getContext("2d").drawImage(img, 0, 0, w, h);
+          URL.revokeObjectURL(url);
+          resolve({ dataUrl: c.toDataURL("image/jpeg", 0.82), width: img.width, height: img.height });
+        } catch (e) { URL.revokeObjectURL(url); reject(e); }
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("bad image")); };
+      img.src = url;
+    });
+  }
+
+  /* Local, on-device analysis: dimensions, dominant colors, brightness, sharpness. */
+  function analyzeLocal(dataUrl) {
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var S = 48;
+          var c = document.createElement("canvas");
+          c.width = S; c.height = S;
+          var ctx = c.getContext("2d");
+          ctx.drawImage(img, 0, 0, S, S);
+          var d = ctx.getImageData(0, 0, S, S).data;
+          var buckets = {}, lumSum = 0, n = S * S, gray = [];
+          for (var i = 0; i < d.length; i += 4) {
+            var r = d[i], g = d[i + 1], b = d[i + 2];
+            var lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            lumSum += lum; gray.push(lum);
+            var key = ((r >> 5) << 6) | ((g >> 5) << 3) | (b >> 5);
+            buckets[key] = (buckets[key] || 0) + 1;
+          }
+          var palette = Object.keys(buckets).sort(function (a, b) { return buckets[b] - buckets[a]; })
+            .slice(0, 5).map(function (k) {
+              k = Number(k);
+              var rr = ((k >> 6) & 7) * 36 + 18, gg = ((k >> 3) & 7) * 36 + 18, bb = (k & 7) * 36 + 18;
+              return "#" + [rr, gg, bb].map(function (v) { return v.toString(16).padStart(2, "0"); }).join("");
+            });
+          var vals = [], mean = 0, y, x;
+          for (y = 1; y < S - 1; y++) for (x = 1; x < S - 1; x++) {
+            var v = gray[y * S + x] * 4 - gray[(y - 1) * S + x] - gray[(y + 1) * S + x] - gray[y * S + x - 1] - gray[y * S + x + 1];
+            vals.push(v); mean += v;
+          }
+          mean /= vals.length;
+          var variance = vals.reduce(function (a, v) { return a + (v - mean) * (v - mean); }, 0) / vals.length;
+          var brightness = lumSum / n;
+          var flags = [];
+          if (brightness < 55) flags.push("dark");
+          if (variance < 30) flags.push("blurry");
+          resolve({ width: img.width, height: img.height, palette: palette, flags: flags });
+        } catch (e) { resolve(null); }
+      };
+      img.onerror = function () { resolve(null); };
+      img.src = dataUrl;
+    });
+  }
+
+  function addPhotoFiles(files) {
+    Array.prototype.slice.call(files || []).forEach(function (f) {
+      if (state.photos.length >= 8) return;
+      processImageFile(f).then(function (p) {
+        if (state.photos.length >= 8) return;
+        var photo = { dataUrl: p.dataUrl, caption: "", tag: "", analysis: null, ai: null };
+        state.photos.push(photo);
+        renderPhotoGrid(); renderPreview();
+        analyzeLocal(p.dataUrl).then(function (a) {
+          photo.analysis = a;
+          renderPhotoGrid();
+        });
+      }).catch(function () { /* skip unreadable files */ });
+    });
+  }
+
+  dz.addEventListener("click", function () { photoInput.click(); });
+  dz.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") photoInput.click(); });
+  photoInput.addEventListener("change", function () { addPhotoFiles(photoInput.files); photoInput.value = ""; });
+  ["dragover", "dragenter"].forEach(function (ev) {
+    dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.add("drag"); });
+  });
+  ["dragleave", "drop"].forEach(function (ev) {
+    dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.remove("drag"); });
+  });
+  dz.addEventListener("drop", function (e) { addPhotoFiles(e.dataTransfer.files); });
+
+  function renderPhotoGrid() {
+    var grid = $("photoGrid");
+    $("photoCount").textContent = state.photos.length ? "(" + state.photos.length + "/8)" : "";
+    grid.innerHTML = "";
+    state.photos.forEach(function (p, i) {
+      var card = document.createElement("div");
+      card.className = "photo-card";
+      var a = p.analysis;
+      var flags = a && a.flags.length
+        ? '<span class="flag warn">' + a.flags.join(" · ") + " — retake?</span>"
+        : (a ? '<span class="flag ok">looks good</span>' : '<span class="flag">analyzing…</span>');
+      var swatches = a ? a.palette.map(function (hex) {
+        return '<span class="swatch" style="background:' + hex + '" title="' + hex + '"></span>';
+      }).join("") : "";
+      var dims = a ? a.width + "×" + a.height : "";
+      var aiBlock = "";
+      if (p.aiLoading) aiBlock = '<div class="ai-panel">Asking the AI to look at this photo…</div>';
+      else if (p.ai) {
+        aiBlock = '<div class="ai-panel"><strong>AI sees:</strong> ' + esc(p.ai.observations) +
+          (p.ai.items && p.ai.items.length
+            ? '<div class="ai-items">' + p.ai.items.map(function (it, k) {
+                return "<div>" + esc(it.description) + " — " + money(it.unitPrice) + "</div>";
+              }).join("") + '</div><button class="small primary" data-aiadd="' + i + '">Add to line items</button>'
+            : "") + "</div>";
+      } else if (p.aiError) {
+        aiBlock = '<div class="ai-panel warn">' + esc(p.aiError) + "</div>";
+      }
+      card.innerHTML =
+        '<img src="' + p.dataUrl + '" alt="job photo">' +
+        '<input class="cap" data-cap="' + i + '" placeholder="Caption…" value="' + esc(p.caption) + '">' +
+        '<div class="photo-meta">' +
+          '<div class="tagrow">' +
+            '<button class="tag' + (p.tag === "" ? " on" : "") + '" data-tag="' + i + '|">—</button>' +
+            '<button class="tag' + (p.tag === "before" ? " on" : "") + '" data-tag="' + i + '|before">Before</button>' +
+            '<button class="tag' + (p.tag === "after" ? " on" : "") + '" data-tag="' + i + '|after">After</button>' +
+          "</div>" +
+          '<button class="small ghost" data-aiphoto="' + i + '">AI look</button>' +
+          '<button class="small danger-ghost" data-delphoto="' + i + '">✕</button>' +
+        "</div>" +
+        '<div class="photo-analysis">' + flags + '<span class="dims">' + dims + "</span>" +
+        (swatches ? '<span class="swatches">' + swatches + "</span>" : "") + "</div>" +
+        aiBlock;
+      grid.appendChild(card);
+    });
+    grid.querySelectorAll("[data-cap]").forEach(function (inp) {
+      inp.addEventListener("input", function () {
+        state.photos[Number(inp.dataset.cap)].caption = inp.value;
+        renderPreview();
+      });
+    });
+    grid.querySelectorAll("[data-tag]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var parts = b.dataset.tag.split("|");
+        state.photos[Number(parts[0])].tag = parts[1];
+        renderPhotoGrid(); renderPreview();
+      });
+    });
+    grid.querySelectorAll("[data-delphoto]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        state.photos.splice(Number(b.dataset.delphoto), 1);
+        renderPhotoGrid(); renderPreview();
+      });
+    });
+    grid.querySelectorAll("[data-aiphoto]").forEach(function (b) {
+      b.addEventListener("click", function () { aiAnalyzePhoto(Number(b.dataset.aiphoto)); });
+    });
+    grid.querySelectorAll("[data-aiadd]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var p = state.photos[Number(b.dataset.aiadd)];
+        (p.ai.items || []).forEach(function (it) {
+          state.items.push({ description: it.description, qty: it.qty || 1, unit: it.unit || "each", unitPrice: it.unitPrice || 0 });
+        });
+        renderItems(); renderPreview();
+        document.getElementById("itemsTable").scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
+  }
+
+  async function aiAnalyzePhoto(i) {
+    var p = state.photos[i];
+    if (!p || p.aiLoading) return;
+    p.aiLoading = true; p.aiError = null; p.ai = null;
+    renderPhotoGrid();
+    try {
+      var r = await fetch("/api/analyze-photo", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl: p.dataUrl, trade: tradeSel.value })
+      });
+      var data = await r.json();
+      if (r.status === 503 && data.error === "no-key") {
+        p.aiError = "AI photo analysis needs your OpenAI key (set OPENAI_API_KEY on the server). The on-device analysis above is always free.";
+      } else if (!r.ok) {
+        p.aiError = "AI analysis failed — try again.";
+      } else {
+        p.ai = data;
+      }
+    } catch (e) {
+      p.aiError = "Couldn't reach the server.";
+    }
+    p.aiLoading = false;
+    renderPhotoGrid();
+  }
 
   /* ---------- line items table ---------- */
   function renderItems() {
@@ -150,6 +352,15 @@
       "<tr><td>Deposit due (" + esc($("depositRate").value || "0") + "%)</td>" + '<td class="num">' + money(t.deposit) + "</td></tr>" +
       '<tr><td>Balance on completion</td><td class="num">' + money(t.balance) + "</td></tr></table>" +
       ($("notes").value ? '<div class="q-notes"><strong>Notes:</strong> ' + esc($("notes").value) + "</div>" : "") +
+      (state.photos.length
+        ? '<div class="q-photos"><h4>Job photos</h4><div class="q-photos-grid">' +
+          state.photos.map(function (p) {
+            return "<figure><img src=\"" + p.dataUrl + "\" alt=\"job photo\">" +
+              ((p.caption || p.tag)
+                ? "<figcaption>" + (p.tag ? '<span class="ptag">' + esc(p.tag) + "</span> " : "") + esc(p.caption) + "</figcaption>"
+                : "") + "</figure>";
+          }).join("") + "</div></div>"
+        : "") +
       '<div class="q-sign"><div>Accepted by (customer signature)</div><div>Date</div></div>';
   }
 
@@ -175,7 +386,8 @@
       company: state.settings.companyName || "",
       customer: $("customer").value, phone: $("phone").value, email: $("email").value,
       trade: tradeSel.value, description: $("description").value,
-      items: state.items, taxRate: $("taxRate").value, depositRate: $("depositRate").value,
+      items: state.items, photos: state.photos.map(function (p) { return { dataUrl: p.dataUrl, caption: p.caption, tag: p.tag }; }),
+      taxRate: $("taxRate").value, depositRate: $("depositRate").value,
       followUp: $("followUp").value, notes: $("notes").value, validDays: $("validDays").value
     };
     try {
@@ -198,6 +410,8 @@
   $("clearBtn").addEventListener("click", function () {
     if (!confirm("Clear this quote form?")) return;
     state.items = [];
+    state.photos = [];
+    renderPhotoGrid();
     ["description", "customer", "phone", "email", "followUp", "notes"].forEach(function (id) { $(id).value = ""; });
     $("taxRate").value = 0; $("depositRate").value = 25; $("validDays").value = 30;
     $("genSource").textContent = ""; $("saveMsg").textContent = "";
@@ -250,7 +464,9 @@
         : "";
       div.innerHTML =
         '<div><div class="num">' + esc(x.number) + '</div><div class="cust">' + esc(x.customer || "—") + "</div>" +
-        '<div class="meta">' + esc(x.trade) + " · " + new Date(x.createdAt).toLocaleDateString() + "</div>" + fu + "</div>" +
+        '<div class="meta">' + esc(x.trade) + " · " + new Date(x.createdAt).toLocaleDateString() +
+        (x.photos && x.photos.length ? " · " + x.photos.length + " photo" + (x.photos.length > 1 ? "s" : "") : "") +
+        "</div>" + fu + "</div>" +
         '<div><span class="status ' + x.status + '">' + x.status + '</span> <span class="total">' + money(x.totals.total) + "</span></div>" +
         '<div class="qbtns">' +
           (x.status !== "won" ? '<button class="small ghost" data-act="won">Won ✓</button>' : "") +
