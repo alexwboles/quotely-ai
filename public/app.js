@@ -34,6 +34,10 @@
       ["new", "quotes", "settings"].forEach(function (k) {
         $("tab-" + k).classList.toggle("hidden", k !== t.dataset.tab);
       });
+      var shown = $("tab-" + t.dataset.tab);
+      shown.classList.remove("view-enter");
+      void shown.offsetWidth;
+      shown.classList.add("view-enter");
       if (t.dataset.tab === "quotes") loadQuotes();
     });
   });
@@ -122,7 +126,7 @@
       if (state.photos.length >= 8) return;
       processImageFile(f).then(function (p) {
         if (state.photos.length >= 8) return;
-        var photo = { dataUrl: p.dataUrl, caption: "", tag: "", addedAt: Date.now(), analysis: null, ai: null };
+        var photo = { dataUrl: p.dataUrl, caption: "", tag: "", addedAt: Date.now(), analysis: null, ai: null, _freshAt: Date.now() };
         state.photos.push(photo);
         renderPhotoGrid(); renderPreview();
         analyzeLocal(p.dataUrl).then(function (a) {
@@ -142,7 +146,13 @@
   ["dragleave", "drop"].forEach(function (ev) {
     dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.remove("drag"); });
   });
-  dz.addEventListener("drop", function (e) { addPhotoFiles(e.dataTransfer.files); });
+  dz.addEventListener("drop", function (e) {
+    addPhotoFiles(e.dataTransfer.files);
+    dz.classList.remove("dropped");
+    void dz.offsetWidth;
+    dz.classList.add("dropped");
+    setTimeout(function () { dz.classList.remove("dropped"); }, 600);
+  });
 
   function fmtTime(ts) {
     if (!ts) return "";
@@ -169,6 +179,7 @@
     state.photos.forEach(function (p, i) {
       var card = document.createElement("div");
       card.className = "photo-card" + (p.tag ? " tag-" + p.tag : "");
+      if (Date.now() - (p._freshAt || 0) < 2200) card.classList.add("developing");
       var a = p.analysis;
       var flags = a && a.flags.length
         ? '<span class="flag warn">' + a.flags.join(" · ") + " — retake?</span>"
@@ -192,7 +203,7 @@
       card.innerHTML =
         '<div class="frame-head"><span class="frame-no">' + String(i + 1).padStart(2, "0") + '</span>' +
         '<span class="frame-time">' + esc(fmtTime(p.addedAt)) + "</span></div>" +
-        '<img src="' + p.dataUrl + '" alt="job photo">' +
+        '<div class="frame"><img src="' + p.dataUrl + '" alt="job photo"></div>' +
         '<input class="cap" data-cap="' + i + '" placeholder="Caption…" value="' + esc(p.caption) + '">' +
         '<div class="photo-meta">' +
           '<div class="tagrow">' +
@@ -247,6 +258,8 @@
     if (!p || p.aiLoading) return;
     p.aiLoading = true; p.aiError = null; p.ai = null;
     renderPhotoGrid();
+    var card = $("photoGrid").children[i];
+    if (card) card.classList.add("scanning");
     try {
       var r = await fetch("/api/analyze-photo", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -366,11 +379,11 @@
         esc($("description").value).slice(0, 300) + "</div></div>" +
       '<table class="q-items"><thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Amount</th></tr></thead>' +
       "<tbody>" + (rows || '<tr><td colspan="4">No line items yet — generate or add some above.</td></tr>') + "</tbody></table>" +
-      '<table class="q-totals"><tr><td>Subtotal</td><td class="num">' + money(t.subtotal) + "</td></tr>" +
-      "<tr><td>Tax (" + esc($("taxRate").value || "0") + "%)</td>" + '<td class="num">' + money(t.tax) + "</td></tr>" +
-      '<tr class="grand"><td>Total</td><td class="num">' + money(t.total) + "</td></tr>" +
-      "<tr><td>Deposit due (" + esc($("depositRate").value || "0") + "%)</td>" + '<td class="num">' + money(t.deposit) + "</td></tr>" +
-      '<tr><td>Balance on completion</td><td class="num">' + money(t.balance) + "</td></tr></table>" +
+      '<table class="q-totals"><tr><td>Subtotal</td><td class="num" id="totSub">' + money(t.subtotal) + "</td></tr>" +
+      "<tr><td>Tax (" + esc($("taxRate").value || "0") + "%)</td>" + '<td class="num" id="totTax">' + money(t.tax) + "</td></tr>" +
+      '<tr class="grand"><td>Total</td><td class="num" id="totTotal">' + money(t.total) + "</td></tr>" +
+      "<tr><td>Deposit due (" + esc($("depositRate").value || "0") + "%)</td>" + '<td class="num" id="totDep">' + money(t.deposit) + "</td></tr>" +
+      '<tr><td>Balance on completion</td><td class="num" id="totBal">' + money(t.balance) + "</td></tr></table>" +
       ($("notes").value ? '<div class="q-notes"><strong>Notes:</strong> ' + esc($("notes").value) + "</div>" : "") +
       (state.photos.length
         ? '<div class="q-photos"><h4>Job photos</h4><div class="q-photos-grid">' +
@@ -383,6 +396,32 @@
           }).join("") + "</div></div>"
         : "") +
       '<div class="q-sign"><div>Accepted by (customer signature)</div><div>Date</div></div>';
+    tweenMoney("totSub", t.subtotal);
+    tweenMoney("totTax", t.tax);
+    tweenMoney("totTotal", t.total);
+    tweenMoney("totDep", t.deposit);
+    tweenMoney("totBal", t.balance);
+  }
+
+  /* animated totals: numbers tick up/down instead of jumping */
+  var lastMoney = {};
+  var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function tweenMoney(id, to) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var from = (id in lastMoney) ? lastMoney[id] : to;
+    lastMoney[id] = to;
+    if (reduceMotion || from === to) { el.textContent = money(to); return; }
+    var t0 = performance.now(), dur = 450;
+    function frame(t) {
+      var k = Math.min(1, (t - t0) / dur);
+      var e = 1 - Math.pow(1 - k, 3);
+      if (!document.body.contains(el)) return;
+      el.textContent = money(from + (to - from) * e);
+      if (k < 1) requestAnimationFrame(frame);
+      else el.textContent = money(to);
+    }
+    requestAnimationFrame(frame);
   }
 
   function nextLocalNumber() {
@@ -419,6 +458,10 @@
       if (!r.ok) throw new Error("save failed");
       var q = await r.json();
       msg.textContent = "Saved as " + q.number + " ✓";
+      var saveBtn = $("saveBtn");
+      saveBtn.classList.remove("saved-pop");
+      void saveBtn.offsetWidth;
+      saveBtn.classList.add("saved-pop");
       await loadQuotes();
       renderPreview();
     } catch (e) {
@@ -554,6 +597,18 @@
   fillSettings();
   renderItems();
   renderPhotoGrid();
+  /* scroll reveal for the 01/02/03 steps */
+  var steps = document.querySelectorAll(".step");
+  if (reduceMotion || !("IntersectionObserver" in window)) {
+    steps.forEach(function (s) { s.classList.add("revealed"); });
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add("revealed"); io.unobserve(e.target); }
+      });
+    }, { threshold: 0.08 });
+    steps.forEach(function (s) { io.observe(s); });
+  }
   loadQuotes().then(renderPreview);
   renderPreview();
 })();
