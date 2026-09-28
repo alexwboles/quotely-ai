@@ -241,7 +241,7 @@
         " need follow-up: " + due.map(function (x) { return esc(x.number + " (" + (x.customer || "no name") + ")"); }).join(", ") + "</div>"
       : "";
 
-    $("quotesList").innerHTML = list.length ? "" : '<p class="hint">No quotes yet. Create one on the New Quote tab.</p>';
+    $("quotesList").innerHTML = list.length ? "" : '<div class="hg-empty"><div class="hg-empty-title">No quotes yet</div><p>Describe your first job and generate a professional quote in seconds.</p><button class="primary" style="width:auto;margin-top:0" onclick="document.querySelector(\'.tab[data-tab=new]\').click()">Create your first quote</button></div>';
     list.forEach(function (x) {
       var div = document.createElement("div");
       div.className = "quote-card";
