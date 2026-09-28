@@ -1,0 +1,1 @@
+{"description":"AI quote builder for tradespeople - describe the job, get a professional quote in seconds","engines":{"node":">=16"},"license":"MIT","main":"server.js","name":"quotely-ai","scripts":{"start":"node server.js","test":"bash test/smoke.sh && bash test/e2e.sh"},"version":"0.1.0"}

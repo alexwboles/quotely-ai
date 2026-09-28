@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quotely AI — Professional quotes in seconds</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar no-print">
+  <div class="brand">⚡ Quotely <span>AI</span></div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="new">New Quote</button>
+    <button class="tab" data-tab="quotes">My Quotes <span id="quoteCount" class="pill"></span></button>
+    <button class="tab" data-tab="settings">Settings</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ============ NEW QUOTE ============ -->
+  <section id="tab-new" class="view">
+    <div class="grid">
+      <div class="card no-print">
+        <h2>1 · Describe the job</h2>
+        <label>Trade
+          <select id="trade"></select>
+        </label>
+        <label>Job description (plain English)
+          <textarea id="description" rows="4" placeholder="e.g. Replace 2 kitchen faucets and fix a leaking bathroom pipe"></textarea>
+        </label>
+        <div class="row">
+          <label>Customer name <input id="customer" placeholder="Jane Smith"></label>
+          <label>Phone <input id="phone" placeholder="(555) 123-4567"></label>
+        </div>
+        <label>Email <input id="email" type="email" placeholder="jane@example.com"></label>
+        <div class="row">
+          <label>Follow-up date <input id="followUp" type="date"></label>
+          <label>Valid for (days) <input id="validDays" type="number" value="30" min="1"></label>
+        </div>
+        <button id="generateBtn" class="primary">✨ Generate line items</button>
+        <p class="hint" id="genSource"></p>
+      </div>
+
+      <div class="card no-print">
+        <h2>2 · Line items</h2>
+        <div class="table-wrap">
+          <table id="itemsTable">
+            <thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th>Unit $</th><th>Total</th><th></th></tr></thead>
+            <tbody id="itemsBody"></tbody>
+          </table>
+        </div>
+        <button id="addLineBtn" class="ghost">+ Add line</button>
+        <div class="totals-edit">
+          <label>Tax % <input id="taxRate" type="number" value="0" min="0" step="0.1"></label>
+          <label>Deposit % <input id="depositRate" type="number" value="25" min="0" max="100"></label>
+        </div>
+        <label>Notes for customer
+          <textarea id="notes" rows="2" placeholder="e.g. 1-year workmanship warranty included"></textarea>
+        </label>
+        <div class="actions">
+          <button id="saveBtn" class="primary">💾 Save quote</button>
+          <button id="printBtn" class="ghost">🖨 Print / PDF</button>
+          <button id="clearBtn" class="danger-ghost">Clear</button>
+        </div>
+        <p class="hint" id="saveMsg"></p>
+      </div>
+    </div>
+
+    <div class="card preview-card">
+      <h2 class="no-print">3 · Professional preview</h2>
+      <div id="preview"><!-- rendered by app.js --></div>
+    </div>
+  </section>
+
+  <!-- ============ MY QUOTES ============ -->
+  <section id="tab-quotes" class="view hidden">
+    <div class="card no-print">
+      <h2>Saved quotes</h2>
+      <div class="filters">
+        <select id="statusFilter">
+          <option value="">All statuses</option>
+          <option value="draft">Draft</option>
+          <option value="sent">Sent</option>
+          <option value="won">Won</option>
+          <option value="lost">Lost</option>
+        </select>
+        <input id="searchBox" placeholder="Search customer or quote #">
+      </div>
+      <div id="followUpAlert"></div>
+      <div id="quotesList"></div>
+    </div>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section id="tab-settings" class="view hidden">
+    <div class="card no-print">
+      <h2>Company profile</h2>
+      <p class="hint">Shown on every quote. Saved in this browser.</p>
+      <label>Company name <input id="companyName" placeholder="Acme Plumbing Co."></label>
+      <div class="row">
+        <label>Phone <input id="companyPhone"></label>
+        <label>Email <input id="companyEmail"></label>
+      </div>
+      <label>Address <input id="companyAddress"></label>
+      <label>Logo (optional) <input id="companyLogo" type="file" accept="image/*"></label>
+      <div id="logoPreview"></div>
+      <button id="saveSettingsBtn" class="primary">Save settings</button>
+      <p class="hint" id="settingsMsg"></p>
+    </div>
+  </section>
+</main>
+
+<footer class="no-print">Quotely AI · free &amp; open — your data stays on your machine</footer>
+
+<script src="generate.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
