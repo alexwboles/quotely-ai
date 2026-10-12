@@ -13,6 +13,7 @@
     items: [],
     photos: [],
     quotes: [],
+    templates: [],
     quoteFilter: "",
     settings: loadSettings()
   };
@@ -551,6 +552,7 @@
         '<div class="' + (cls === "due" ? "fu-due" : cls === "soon" ? "fu-soon" : "fu-none") + '">' + esc(x.followUp) + "</div>";
       fl.appendChild(d);
     });
+    renderCustomers();
   }
 
   function setQuoteFilter(s) {
@@ -632,6 +634,7 @@
           (x.status !== "lost" ? '<button class="small ghost" data-act="lost">Lost</button>' : "") +
           ((x.status === "won" || x.status === "lost") ? '<button class="small ghost" data-act="sent">Reopen</button>' : "") +
           '<button class="small danger-ghost" data-act="del">Delete</button>' +
+          '<button class="small ghost" data-act="history">History</button>' +
         "</div></td>";
       tr.querySelectorAll("[data-act]").forEach(function (b) {
         b.addEventListener("click", function () { quoteAction(x.id, b.dataset.act); });
@@ -642,6 +645,7 @@
 
   async function quoteAction(id, act) {
     if (act === "del" && !confirm("Delete this quote?")) return;
+    if (act === "history") { openHistory(id); return; }
     try {
       if (act === "del") {
         await fetch("/api/quotes/" + id, { method: "DELETE" });
@@ -653,6 +657,104 @@
       }
       await loadQuotes(); renderPreview();
     } catch (e) { alert("Couldn't reach the server."); }
+  }
+
+  /* ---------- quote version history ---------- */
+  function openHistory(id) {
+    var q = state.quotes.filter(function (x) { return x.id === id; })[0];
+    if (!q) return;
+    var hist = Array.isArray(q.history) ? q.history : [];
+    $("historyTitle").textContent = "Version history — " + (q.number || "");
+    $("historyBody").innerHTML = hist.length
+      ? hist.map(function (v, i) {
+          var n = (v.items || []).length;
+          var total = v.totals && v.totals.total != null ? money(v.totals.total) : "—";
+          return '<div class="hist-row"><div><strong>' + new Date(v.at).toLocaleString() + "</strong>" +
+            '<div class="hint">' + n + " line item" + (n === 1 ? "" : "s") + " · total " + total + "</div></div>" +
+            '<button class="ghost small" data-restore="' + i + '">Restore this version</button></div>';
+        }).join("")
+      : '<p class="hint">No earlier versions — edits to the line items are snapshotted here automatically.</p>';
+    $("historyModal").classList.remove("hidden");
+    $("historyBody").querySelectorAll("[data-restore]").forEach(function (b) {
+      b.addEventListener("click", async function () {
+        if (!confirm("Restore this version's line items? The current items will be kept as a version too.")) return;
+        try {
+          var r = await fetch("/api/quotes/" + id + "/restore", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ index: Number(b.dataset.restore) })
+          });
+          if (!r.ok) throw new Error("restore failed");
+          $("historyModal").classList.add("hidden");
+          await loadQuotes();
+        } catch (e) { alert("Couldn't reach the server."); }
+      });
+    });
+  }
+  $("historyClose").addEventListener("click", function () { $("historyModal").classList.add("hidden"); });
+  $("historyModal").addEventListener("click", function (e) {
+    if (e.target === $("historyModal")) $("historyModal").classList.add("hidden");
+  });
+
+  /* ---------- line-item templates ---------- */
+  async function loadTemplates() {
+    try {
+      var r = await fetch("/api/templates");
+      state.templates = r.ok ? await r.json() : [];
+    } catch (e) { state.templates = []; }
+    renderTemplateSel();
+  }
+  function renderTemplateSel() {
+    var sel = $("templateSel");
+    var ts = state.templates || [];
+    sel.innerHTML = '<option value="">— Apply a saved template —</option>' + ts.map(function (t) {
+      return '<option value="' + t.id + '">' + esc(t.name) + " (" + t.items.length + " items · " + esc(t.trade) + ")</option>";
+    }).join("");
+  }
+  $("applyTemplateBtn").addEventListener("click", function () {
+    var id = $("templateSel").value;
+    if (!id) return;
+    var t = (state.templates || []).filter(function (x) { return x.id === id; })[0];
+    if (!t) return;
+    if (state.items.length && !confirm("Replace the current line items with this template?")) return;
+    state.items = t.items.map(function (i) {
+      return { description: i.description, qty: i.qty, unit: i.unit, unitPrice: i.unitPrice };
+    });
+    renderItems(); renderPreview();
+  });
+  $("saveTemplateBtn").addEventListener("click", async function () {
+    if (!state.items.length) { alert("Add line items first, then save them as a template."); return; }
+    var name = prompt("Template name — e.g. Faucet replacement (standard):");
+    if (!name || !name.trim()) return;
+    try {
+      var r = await fetch("/api/templates", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), trade: tradeSel.value, items: state.items })
+      });
+      if (!r.ok) { var err = await r.json().catch(function () { return {}; }); throw new Error(err.error || "save failed"); }
+      await loadTemplates();
+      alert("Template saved.");
+    } catch (e) { alert("Couldn't save template: " + e.message); }
+  });
+
+  /* ---------- customer directory ---------- */
+  async function renderCustomers() {
+    var body = $("customersBody");
+    try {
+      var r = await fetch("/api/customers");
+      var cs = r.ok ? await r.json() : [];
+      body.innerHTML = cs.length ? "" : '<tr class="empty-row"><td colspan="7">No customers yet — save a quote with a customer name.</td></tr>';
+      cs.slice(0, 10).forEach(function (c) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = '<td class="t-cust">' + esc(c.name) + "</td>" +
+          "<td>" + esc(c.phone || c.email || "—") + "</td>" +
+          '<td class="num">' + c.quotes + '</td><td class="num">' + c.won + "</td>" +
+          '<td class="num">' + money(c.totalQuoted) + '</td><td class="num">' + money(c.totalWon) + "</td>" +
+          "<td>" + esc((c.lastQuoteAt || "").slice(0, 10)) + "</td>";
+        body.appendChild(tr);
+      });
+    } catch (e) {
+      body.innerHTML = '<tr class="empty-row"><td colspan="7">Could not load customers.</td></tr>';
+    }
   }
 
   document.querySelectorAll("#statusPills .fpill").forEach(function (p) {
@@ -698,6 +800,7 @@
   fillSettings();
   renderItems();
   renderPhotoGrid();
+  loadTemplates();
   loadQuotes().then(function () { renderDashboard(); renderPreview(); });
   renderPreview();
 })();

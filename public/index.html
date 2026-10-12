@@ -52,6 +52,12 @@
           <div id="followList"></div>
         </div>
       </div>
+      <div class="panel">
+        <div class="panel-head"><h3>Top customers</h3><span class="hint">lifetime value from saved quotes</span></div>
+        <div class="table-wrap"><table class="tbl"><thead><tr>
+          <th>Customer</th><th>Contact</th><th class="num">Quotes</th><th class="num">Won</th><th class="num">Quoted</th><th class="num">Won value</th><th>Last quote</th>
+        </tr></thead><tbody id="customersBody"></tbody></table></div>
+      </div>
     </section>
 
     <!-- ============ NEW QUOTE ============ -->
@@ -105,6 +111,11 @@
 
           <div class="panel">
             <div class="panel-head"><h3>Line items</h3><button id="addLineBtn" class="ghost small">+ Add line</button></div>
+            <div class="template-bar">
+              <select id="templateSel" aria-label="Apply a saved line-item template"></select>
+              <button id="applyTemplateBtn" class="ghost small">Apply template</button>
+              <button id="saveTemplateBtn" class="ghost small">Save as template</button>
+            </div>
             <div class="table-wrap">
               <table class="tbl editable" id="itemsTable">
                 <thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th>Unit $</th><th class="num">Total</th><th></th></tr></thead>
@@ -185,6 +196,13 @@
       </div>
     </section>
   </main>
+</div>
+
+<div id="historyModal" class="modal hidden" role="dialog" aria-label="Quote version history">
+  <div class="modal-card">
+    <div class="modal-head"><h3 id="historyTitle">Version history</h3><button id="historyClose" class="ghost small">Close</button></div>
+    <div id="historyBody"></div>
+  </div>
 </div>
 
 <script src="generate.js"></script>

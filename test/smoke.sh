@@ -113,5 +113,56 @@ L3=$(curl -s "$BASE/api/quotes")
 ! echo "$L3" | grep -q "$QPID" && ! echo "$L3" | grep -q "$QCID" \
   && ok "photo test quotes deleted" || bad "photo cleanup failed"
 
+
+# 18. templates: create -> list -> delete
+T=$(curl -s -X POST "$BASE/api/templates" -H 'Content-Type: application/json' \
+  -d '{"name":"Smoke Template","trade":"Plumbing","items":[{"description":"Faucet swap","qty":1,"unit":"each","unitPrice":150}]}')
+TID=$(echo "$T" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+[ -n "$TID" ] && ok "POST /api/templates saved (id=$TID)" || bad "template save failed: ${T:0:200}"
+TL=$(curl -s "$BASE/api/templates")
+echo "$TL" | grep -q "$TID" && ok "GET /api/templates lists saved template" || bad "template list missing"
+TBAD=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/templates" -H 'Content-Type: application/json' -d '{"name":"","items":[]}')
+[ "$TBAD" = "400" ] && ok "template validation rejects empty name/items" || bad "template validation http=$TBAD"
+TD=$(curl -s -X DELETE "$BASE/api/templates/$TID")
+TL2=$(curl -s "$BASE/api/templates")
+echo "$TD" | grep -q '"ok":true' && ! echo "$TL2" | grep -q "$TID" \
+  && ok "DELETE /api/templates removes it" || bad "template delete failed"
+
+# 19. version history: edit items -> snapshot -> restore
+QV=$(curl -s -X POST "$BASE/api/quotes" -H 'Content-Type: application/json' \
+  -d '{"customer":"Version Test","trade":"Painting","items":[{"description":"Prime walls","qty":1,"unit":"job","unitPrice":200}],"taxRate":0,"depositRate":0}')
+QVID=$(echo "$QV" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "$QV" | grep -q '"history":\[\]' && ok "new quote starts with empty history" || bad "no history array: ${QV:0:200}"
+curl -s -X PUT "$BASE/api/quotes/$QVID" -H 'Content-Type: application/json' \
+  -d '{"items":[{"description":"Prime walls","qty":1,"unit":"job","unitPrice":200},{"description":"Two coats","qty":1,"unit":"job","unitPrice":350}]}' >/dev/null
+QH=$(curl -s "$BASE/api/quotes" | python3 -c "import json,sys; d=json.load(sys.stdin); q=[x for x in d if x['id']=='$QVID'][0]; print(len(q.get('history',[])), q['history'][0]['items'][0]['unitPrice'] if q.get('history') else '')")
+echo "$QH" | grep -q '^1 200' && ok "PUT items snapshots previous version (history=1, old price 200)" || bad "history wrong: $QH"
+curl -s -X PUT "$BASE/api/quotes/$QVID" -H 'Content-Type: application/json' -d '{"status":"sent"}' >/dev/null
+QH2=$(curl -s "$BASE/api/quotes" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len([x for x in d if x['id']=='$QVID'][0].get('history',[])))")
+[ "$QH2" = "1" ] && ok "status-only PUT does not snapshot" || bad "spurious snapshot: $QH2"
+RS=$(curl -s -X POST "$BASE/api/quotes/$QVID/restore" -H 'Content-Type: application/json' -d '{"index":0}')
+echo "$RS" | grep -q '"unitPrice":200' && ok "POST restore brings back old line items" || bad "restore failed: ${RS:0:200}"
+RSBAD=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/quotes/$QVID/restore" -H 'Content-Type: application/json' -d '{"index":99}')
+[ "$RSBAD" = "400" ] && ok "restore rejects bad index" || bad "restore validation http=$RSBAD"
+curl -s -X DELETE "$BASE/api/quotes/$QVID" >/dev/null
+ok "version test quote cleaned up"
+
+# 20. customers directory aggregates lifetime value
+QC2=$(curl -s -X POST "$BASE/api/quotes" -H 'Content-Type: application/json' \
+  -d '{"customer":"Dir Test","trade":"Plumbing","items":[{"description":"x","qty":1,"unit":"each","unitPrice":100}],"taxRate":0,"depositRate":0}')
+QCID2=$(echo "$QC2" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+curl -s -X PUT "$BASE/api/quotes/$QCID2" -H 'Content-Type: application/json' -d '{"status":"won"}' >/dev/null
+CU=$(curl -s "$BASE/api/customers")
+echo "$CU" | grep -q 'Dir Test' && echo "$CU" | grep -q '"won":1' && echo "$CU" | grep -q '"totalWon":100' \
+  && ok "GET /api/customers aggregates Dir Test (1 won, \$100)" || bad "customers wrong: ${CU:0:300}"
+curl -s -X DELETE "$BASE/api/quotes/$QCID2" >/dev/null
+
+# 21. UI wiring — templates, customers, history
+missing=""
+for n in templateSel applyTemplateBtn saveTemplateBtn customersBody historyModal historyBody historyTitle historyClose; do
+  grep -q "$n" "$DIR/public/index.html" || missing="$missing html:$n"
+  grep -q "$n" "$DIR/public/app.js" || missing="$missing js:$n"
+done
+[ -z "$missing" ] && ok "UI wires templates/customers/history" || bad "missing wiring:$missing"
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

@@ -93,6 +93,40 @@ C8=$(curl -s "$BASE/api/quotes" | python3 -c "import json,sys; d=json.load(sys.s
 [ "$C8" = "1 Roof" ] && ok "flow8: photo persists across restart with caption" || bad "flow8: $C8"
 curl -s -X DELETE "$BASE/api/quotes/$ID8" >/dev/null
 
+# ---- Flow 9: templates — save, apply, delete ----
+T9=$(curl -s -X POST "$BASE/api/templates" -H 'Content-Type: application/json' \
+  -d '{"name":"E2E Faucet Job","trade":"Plumbing","items":[{"description":"Faucet swap","qty":2,"unit":"each","unitPrice":145}]}')
+TID9=$(echo "$T9" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+[ -n "$TID9" ] && ok "flow9: template saved ($TID9)" || bad "flow9: template save failed"
+TN9=$(curl -s "$BASE/api/templates" | python3 -c "import json,sys; d=json.load(sys.stdin); t=[x for x in d if x['id']=='$TID9'][0]; print(t['name'], len(t['items']), t['items'][0]['unitPrice'])")
+[ "$TN9" = "E2E Faucet Job 1 145" ] && ok "flow9: template round-trips with items" || bad "flow9: $TN9"
+curl -s -X DELETE "$BASE/api/templates/$TID9" >/dev/null
+TD9=$(curl -s "$BASE/api/templates" | python3 -c "import json,sys; print(len([x for x in json.load(sys.stdin) if x['id']=='$TID9']))")
+[ "$TD9" = "0" ] && ok "flow9: template deleted" || bad "flow9: template remains"
+
+# ---- Flow 10: version history snapshots edits and restores ----
+Q10=$(curl -s -X POST "$BASE/api/quotes" -H 'Content-Type: application/json' \
+  -d '{"customer":"Hist Test","trade":"Electrical","items":[{"description":"Outlet swap","qty":4,"unit":"each","unitPrice":65}],"taxRate":0,"depositRate":0}')
+ID10=$(echo "$Q10" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+curl -s -X PUT "$BASE/api/quotes/$ID10" -H 'Content-Type: application/json' \
+  -d '{"items":[{"description":"Outlet swap","qty":4,"unit":"each","unitPrice":75}]}' >/dev/null
+H10=$(curl -s "$BASE/api/quotes" | python3 -c "import json,sys; d=json.load(sys.stdin); q=[x for x in d if x['id']=='$ID10'][0]; print(len(q['history']), q['history'][0]['items'][0]['unitPrice'], q['totals']['total'])")
+[ "$H10" = "1 65 300" ] || [ "$H10" = "1 65 300.0" ] && ok "flow10: edit snapshots old price 65, new total 300" || bad "flow10: $H10"
+R10=$(curl -s -X POST "$BASE/api/quotes/$ID10/restore" -H 'Content-Type: application/json' -d '{"index":0}')
+RT10=$(echo "$R10" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['totals']['total'], len(d['history']))")
+[ "$RT10" = "260 2" ] || [ "$RT10" = "260.0 2" ] && ok "flow10: restore reverts to 260 and keeps current as version" || bad "flow10: restore=$RT10"
+curl -s -X DELETE "$BASE/api/quotes/$ID10" >/dev/null
+
+# ---- Flow 11: customers directory aggregates lifetime value ----
+C11=$(curl -s "$BASE/api/customers" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+b = [x for x in d if x['name']=='Bob Jones']
+a = [x for x in d if x['name']=='Amy Wu']
+print(len(d), b[0]['quotes'] if b else 0, b[0]['won'] if b else 0, a[0]['quotes'] if a else 0)
+")
+[ "$C11" = "2 1 1 1" ] && ok "flow11: customers directory (Bob: 1 quote won, Amy: 1 quote)" || bad "flow11: $C11"
+
 # ---- Flow 7: delete cleans up ----
 curl -s -X DELETE "$BASE/api/quotes/$ID1" >/dev/null
 curl -s -X DELETE "$BASE/api/quotes/$ID2" >/dev/null

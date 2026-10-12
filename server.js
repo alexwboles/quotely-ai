@@ -20,6 +20,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const ROOT = path.join(__dirname, "public");
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "quotes.json");
+const TEMPLATES_FILE = path.join(DATA_DIR, "templates.json");
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -54,6 +55,78 @@ function writeQuotes(quotes) {
   const tmp = DATA_FILE + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(quotes, null, 2), "utf8");
   fs.renameSync(tmp, DATA_FILE);
+}
+
+/* ---------- line-item templates ("frequent jobs") ---------- */
+function readTemplates() {
+  ensureDataDir();
+  try {
+    const raw = fs.readFileSync(TEMPLATES_FILE, "utf8");
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function writeTemplates(templates) {
+  ensureDataDir();
+  const tmp = TEMPLATES_FILE + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(templates, null, 2), "utf8");
+  fs.renameSync(tmp, TEMPLATES_FILE);
+}
+
+function cleanTemplate(body) {
+  const name = String(body.name || "").trim().slice(0, 80);
+  if (!name) throw new Error("template needs a name");
+  const items = cleanItems(body.items);
+  if (!items.length) throw new Error("template needs at least one line item");
+  return {
+    id: "t_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+    name,
+    trade: String(body.trade || "General Handyman").slice(0, 60),
+    items,
+    createdAt: new Date().toISOString()
+  };
+}
+
+/* ---------- customer directory (aggregated from quotes) ---------- */
+function customerDirectory(quotes) {
+  const map = {};
+  for (const q of quotes) {
+    const name = String(q.customer || "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (!map[key]) {
+      map[key] = {
+        name, phone: q.phone || "", email: q.email || "",
+        quotes: 0, won: 0, lost: 0,
+        totalQuoted: 0, totalWon: 0, lastQuoteAt: ""
+      };
+    }
+    const c = map[key];
+    c.quotes++;
+    const total = Number((q.totals && q.totals.total) || 0);
+    c.totalQuoted = Math.round((c.totalQuoted + total) * 100) / 100;
+    if (q.status === "won") { c.won++; c.totalWon = Math.round((c.totalWon + total) * 100) / 100; }
+    if (q.status === "lost") c.lost++;
+    if (!c.phone && q.phone) c.phone = q.phone;
+    if (!c.email && q.email) c.email = q.email;
+    if (String(q.createdAt || "") > c.lastQuoteAt) c.lastQuoteAt = q.createdAt || "";
+  }
+  return Object.keys(map).map(k => map[k])
+    .sort((a, b) => b.totalQuoted - a.totalQuoted);
+}
+
+/* Snapshot the old items/totals before an edit, so the owner can restore. */
+function snapshotVersion(q) {
+  q.history = Array.isArray(q.history) ? q.history : [];
+  q.history.unshift({
+    at: new Date().toISOString(),
+    items: q.items,
+    totals: q.totals
+  });
+  if (q.history.length > 20) q.history.length = 20;
 }
 
 function nextQuoteNumber(quotes) {
@@ -264,6 +337,60 @@ async function handleApi(req, res) {
     return sendJson(res, 200, readQuotes());
   }
 
+  /* Line-item templates: save the line items you reuse, apply in one click. */
+  if (req.method === "GET" && p === "/api/templates") {
+    return sendJson(res, 200, readTemplates());
+  }
+
+  if (req.method === "POST" && p === "/api/templates") {
+    const body = await readBody(req);
+    try {
+      const templates = readTemplates();
+      const t = cleanTemplate(body);
+      templates.unshift(t);
+      writeTemplates(templates);
+      return sendJson(res, 201, t);
+    } catch (e) {
+      return sendJson(res, 400, { error: e.message });
+    }
+  }
+
+  const tplMatch = /^\/api\/templates\/([A-Za-z0-9_.-]+)$/.exec(p);
+  if (tplMatch && req.method === "DELETE") {
+    const templates = readTemplates();
+    const idx = templates.findIndex(t => t.id === tplMatch[1]);
+    if (idx === -1) return sendJson(res, 404, { error: "template not found" });
+    templates.splice(idx, 1);
+    writeTemplates(templates);
+    return sendJson(res, 200, { ok: true });
+  }
+
+  /* Customer directory: lifetime value aggregated from saved quotes. */
+  if (req.method === "GET" && p === "/api/customers") {
+    return sendJson(res, 200, customerDirectory(readQuotes()));
+  }
+
+  /* Restore a quote's line items from a version-history snapshot. */
+  const restoreMatch = /^\/api\/quotes\/([A-Za-z0-9_.-]+)\/restore$/.exec(p);
+  if (restoreMatch && req.method === "POST") {
+    const quotes = readQuotes();
+    const q = quotes.find(x => x.id === restoreMatch[1]);
+    if (!q) return sendJson(res, 404, { error: "quote not found" });
+    const body = await readBody(req);
+    const idx = Number(body.index);
+    const hist = Array.isArray(q.history) ? q.history : [];
+    if (!Number.isInteger(idx) || idx < 0 || idx >= hist.length) {
+      return sendJson(res, 400, { error: "unknown version" });
+    }
+    const snap = hist[idx]; // capture before snapshotVersion mutates the array
+    snapshotVersion(q); // the current items become restorable too
+    q.items = cleanItems(snap.items);
+    q.totals = Quotely.quoteTotals(q.items, q.taxRate, q.depositRate);
+    q.updatedAt = new Date().toISOString();
+    writeQuotes(quotes);
+    return sendJson(res, 200, q);
+  }
+
   if (req.method === "POST" && p === "/api/quotes") {
     const body = await readBody(req, 20e6);
     const quotes = readQuotes();
@@ -289,7 +416,8 @@ async function handleApi(req, res) {
       totals,
       followUp: String(body.followUp || "").slice(0, 10),
       notes: String(body.notes || "").slice(0, 2000),
-      validDays: Number(body.validDays) || 30
+      validDays: Number(body.validDays) || 30,
+      history: []
     };
     quotes.unshift(quote);
     writeQuotes(quotes);
@@ -310,8 +438,12 @@ async function handleApi(req, res) {
       for (const k of allowed) {
         if (body[k] === undefined) continue;
         if (k === "items") {
-          q.items = cleanItems(body.items);
-          q.totals = Quotely.quoteTotals(q.items, q.taxRate, q.depositRate);
+          const next = cleanItems(body.items);
+          if (JSON.stringify(next) !== JSON.stringify(q.items)) {
+            snapshotVersion(q); // keep the old line items restorable
+            q.items = next;
+            q.totals = Quotely.quoteTotals(q.items, q.taxRate, q.depositRate);
+          }
         } else if (k === "photos") {
           q.photos = cleanPhotos(body.photos);
         } else if (k === "taxRate" || k === "depositRate") {
