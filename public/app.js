@@ -393,6 +393,8 @@
       '<tr class="grand"><td>Total</td><td class="num" id="totTotal">' + money(t.total) + "</td></tr>" +
       "<tr><td>Deposit due (" + esc($("depositRate").value || "0") + "%)</td>" + '<td class="num" id="totDep">' + money(t.deposit) + "</td></tr>" +
       '<tr><td>Balance on completion</td><td class="num" id="totBal">' + money(t.balance) + "</td></tr></table>" +
+      '<div class="q-terms"><strong>Payment terms:</strong> ' + esc($("payTerms").value || "Due on receipt") +
+      ($("warranty").value ? ' · <strong>Warranty:</strong> ' + esc($("warranty").value) : "") + "</div>" +
       ($("notes").value ? '<div class="q-notes"><strong>Notes:</strong> ' + esc($("notes").value) + "</div>" : "") +
       (state.photos.length
         ? '<div class="q-photos"><h4>Job photos</h4><div class="q-photos-grid">' +
@@ -457,7 +459,8 @@
       trade: tradeSel.value, description: $("description").value,
       items: state.items, photos: state.photos.map(function (p) { return { dataUrl: p.dataUrl, caption: p.caption, tag: p.tag, addedAt: p.addedAt }; }),
       taxRate: $("taxRate").value, depositRate: $("depositRate").value,
-      followUp: $("followUp").value, notes: $("notes").value, validDays: $("validDays").value
+      followUp: $("followUp").value, notes: $("notes").value, validDays: $("validDays").value,
+      paymentTerms: $("payTerms").value, warranty: $("warranty").value
     };
     try {
       var r = await fetch("/api/quotes", {
@@ -485,8 +488,9 @@
     state.items = [];
     state.photos = [];
     renderPhotoGrid();
-    ["description", "customer", "phone", "email", "followUp", "notes"].forEach(function (id) { $(id).value = ""; });
+    ["description", "customer", "phone", "email", "followUp", "notes", "warranty"].forEach(function (id) { $(id).value = ""; });
     $("taxRate").value = 0; $("depositRate").value = 25; $("validDays").value = 30;
+    $("payTerms").value = "Due on receipt";
     $("genSource").textContent = ""; $("saveMsg").textContent = "";
     renderItems(); renderPreview();
   });
@@ -587,16 +591,18 @@
     var q = $("searchBox").value.toLowerCase();
     var filter = state.quoteFilter;
     var list = state.quotes.filter(function (x) {
-      if (filter && x.status !== filter) return false;
+      if (filter === "expired") { if (!Quotely.isQuoteExpired(x)) return false; }
+      else if (filter && x.status !== filter) return false;
       if (q && (x.customer + " " + x.number).toLowerCase().indexOf(q) === -1) return false;
       return true;
     });
     $("quoteCount").textContent = state.quotes.length || "";
     var names = ["draft", "sent", "won", "lost"];
+    var expiredCount = state.quotes.filter(Quotely.isQuoteExpired).length;
     $("quotesSub").textContent = state.quotes.length
       ? state.quotes.length + " total  \u00b7  " + names.map(function (s) {
           return state.quotes.filter(function (x) { return x.status === s; }).length + " " + s;
-        }).join("  \u00b7  ")
+        }).join("  \u00b7  ") + (expiredCount ? "  \u00b7  " + expiredCount + " expired" : "")
       : "No quotes yet \u2014 create your first one.";
 
     var today = new Date().toISOString().slice(0, 10);
@@ -626,13 +632,15 @@
         '<td class="t-cust">' + esc(x.customer || "\u2014") + "</td>" +
         '<td class="t-sub">' + esc(x.trade || "\u2014") + "</td>" +
         '<td class="num t-num">' + money((x.totals && x.totals.total) || 0) + "</td>" +
-        '<td><span class="status ' + x.status + '">' + x.status + "</span></td>" +
+        '<td><span class="status ' + x.status + '">' + x.status + "</span>" +
+        (Quotely.isQuoteExpired(x) ? ' <span class="status expired">expired</span>' : "") + "</td>" +
         "<td>" + fu + "</td>" +
         '<td><div class="row-actions">' +
           (x.status === "draft" ? '<button class="small ghost" data-act="sent">Mark sent</button>' : "") +
           (x.status !== "won" ? '<button class="small ghost" data-act="won">Won</button>' : "") +
           (x.status !== "lost" ? '<button class="small ghost" data-act="lost">Lost</button>' : "") +
           ((x.status === "won" || x.status === "lost") ? '<button class="small ghost" data-act="sent">Reopen</button>' : "") +
+          '<button class="small ghost" data-act="dup">Duplicate</button>' +
           '<button class="small danger-ghost" data-act="del">Delete</button>' +
           '<button class="small ghost" data-act="history">History</button>' +
         "</div></td>";
@@ -649,6 +657,9 @@
     try {
       if (act === "del") {
         await fetch("/api/quotes/" + id, { method: "DELETE" });
+      } else if (act === "dup") {
+        var dr = await fetch("/api/quotes/" + id + "/duplicate", { method: "POST" });
+        if (!dr.ok) throw new Error("duplicate failed");
       } else {
         await fetch("/api/quotes/" + id, {
           method: "PUT", headers: { "Content-Type": "application/json" },

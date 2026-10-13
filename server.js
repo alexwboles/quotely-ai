@@ -131,13 +131,24 @@ function snapshotVersion(q) {
 
 function nextQuoteNumber(quotes) {
   const year = new Date().getFullYear();
+  const prefix = "Q-" + year + "-";
   let max = 0;
   for (const q of quotes) {
     const m = /^Q-(\d{4})-(\d+)$/.exec(q.number || "");
     if (m && Number(m[1]) === year) max = Math.max(max, Number(m[2]));
   }
-  return "Q-" + year + "-" + String(max + 1).padStart(4, "0");
+  return prefix + String(max + 1).padStart(4, "0");
 }
+
+/* ---------- second sweep: payment terms, expiry, duplicate ---------- */
+const PAYMENT_TERMS = ["Due on receipt", "Net 15", "Net 30", "Net 60"];
+function cleanTerms(v) {
+  const s = String(v || "");
+  return PAYMENT_TERMS.indexOf(s) !== -1 ? s : PAYMENT_TERMS[0];
+}
+/* Validity deadline = createdAt + validDays (shared with the browser via generate.js). */
+function quoteExpiryISO(q) { return Quotely.quoteExpiryISO(q); }
+function isQuoteExpired(q, todayISO) { return Quotely.isQuoteExpired(q, todayISO); }
 
 function cleanItems(items) {
   if (!Array.isArray(items)) return [];
@@ -391,6 +402,41 @@ async function handleApi(req, res) {
     return sendJson(res, 200, q);
   }
 
+  /* Duplicate a quote into a fresh draft (new number, reset dates/status). */
+  const dupMatch = /^\/api\/quotes\/([A-Za-z0-9_.-]+)\/duplicate$/.exec(p);
+  if (dupMatch && req.method === "POST") {
+    const quotes = readQuotes();
+    const src = quotes.find(x => x.id === dupMatch[1]);
+    if (!src) return sendJson(res, 404, { error: "quote not found" });
+    const items = cleanItems(src.items);
+    const now = new Date().toISOString();
+    const copy = {
+      id: "q_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      number: nextQuoteNumber(quotes),
+      status: "draft",
+      createdAt: now,
+      updatedAt: now,
+      company: src.company || "", customer: src.customer || "",
+      phone: src.phone || "", email: src.email || "",
+      trade: src.trade || "General Handyman",
+      description: src.description || "",
+      items,
+      photos: cleanPhotos(src.photos),
+      taxRate: Number(src.taxRate) || 0,
+      depositRate: Number(src.depositRate) || 0,
+      totals: Quotely.quoteTotals(items, Number(src.taxRate) || 0, Number(src.depositRate) || 0),
+      followUp: "",
+      notes: src.notes || "",
+      validDays: Number(src.validDays) || 30,
+      paymentTerms: cleanTerms(src.paymentTerms),
+      warranty: String(src.warranty || "").slice(0, 500),
+      history: []
+    };
+    quotes.unshift(copy);
+    writeQuotes(quotes);
+    return sendJson(res, 201, copy);
+  }
+
   if (req.method === "POST" && p === "/api/quotes") {
     const body = await readBody(req, 20e6);
     const quotes = readQuotes();
@@ -417,6 +463,8 @@ async function handleApi(req, res) {
       followUp: String(body.followUp || "").slice(0, 10),
       notes: String(body.notes || "").slice(0, 2000),
       validDays: Number(body.validDays) || 30,
+      paymentTerms: cleanTerms(body.paymentTerms),
+      warranty: String(body.warranty || "").slice(0, 500),
       history: []
     };
     quotes.unshift(quote);
@@ -434,10 +482,14 @@ async function handleApi(req, res) {
     if (req.method === "PUT") {
       const body = await readBody(req, 20e6);
       const q = quotes[idx];
-      const allowed = ["status", "followUp", "notes", "customer", "phone", "email", "company", "trade", "description", "taxRate", "depositRate", "validDays", "items", "photos"];
+      const allowed = ["status", "followUp", "notes", "customer", "phone", "email", "company", "trade", "description", "taxRate", "depositRate", "validDays", "items", "photos", "paymentTerms", "warranty"];
       for (const k of allowed) {
         if (body[k] === undefined) continue;
-        if (k === "items") {
+        if (k === "paymentTerms") {
+          q.paymentTerms = cleanTerms(body.paymentTerms);
+        } else if (k === "warranty") {
+          q.warranty = String(body.warranty || "").slice(0, 500);
+        } else if (k === "items") {
           const next = cleanItems(body.items);
           if (JSON.stringify(next) !== JSON.stringify(q.items)) {
             snapshotVersion(q); // keep the old line items restorable

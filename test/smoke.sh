@@ -164,5 +164,57 @@ for n in templateSel applyTemplateBtn saveTemplateBtn customersBody historyModal
   grep -q "$n" "$DIR/public/app.js" || missing="$missing js:$n"
 done
 [ -z "$missing" ] && ok "UI wires templates/customers/history" || bad "missing wiring:$missing"
+
+# 22. expiry helpers (shared logic)
+node -e "
+const Q = require('$DIR/public/generate.js');
+const old = { createdAt: '2026-09-01T00:00:00.000Z', validDays: 30, status: 'draft' };
+if (Q.quoteExpiryISO(old) !== '2026-10-01') throw new Error('expiry date');
+if (!Q.isQuoteExpired(old, '2026-10-13')) throw new Error('should be expired');
+if (Q.isQuoteExpired(old, '2026-09-15')) throw new Error('not yet expired');
+const won = Object.assign({}, old, { status: 'won' });
+if (Q.isQuoteExpired(won, '2026-10-13')) throw new Error('won quotes never expire');
+const fresh = { createdAt: new Date().toISOString(), validDays: 30, status: 'draft' };
+if (Q.isQuoteExpired(fresh)) throw new Error('fresh quote expired');
+if (Q.quoteExpiryISO({}) !== null) throw new Error('bad createdAt should be null');
+console.log('ok');
+" >/dev/null && ok "quoteExpiryISO/isQuoteExpired logic" || bad "expiry helpers"
+
+# 23. payment terms + warranty saved on POST, validated on PUT
+QT=$(curl -s -X POST "$BASE/api/quotes" -H 'Content-Type: application/json' \
+  -d '{"customer":"Terms Test","trade":"Plumbing","items":[{"description":"x","qty":1,"unit":"each","unitPrice":50}],"paymentTerms":"Net 30","warranty":"2-year warranty"}')
+QTID=$(echo "$QT" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "$QT" | grep -q '"paymentTerms":"Net 30"' && echo "$QT" | grep -q '"warranty":"2-year warranty"' \
+  && ok "POST saves paymentTerms + warranty" || bad "terms not saved: ${QT:0:300}"
+UPT=$(curl -s -X PUT "$BASE/api/quotes/$QTID" -H 'Content-Type: application/json' -d '{"paymentTerms":"Net 99"}')
+echo "$UPT" | grep -q '"paymentTerms":"Due on receipt"' && ok "PUT rejects bad terms -> default" || bad "bad terms accepted: ${UPT:0:200}"
+UPL=$(echo "$QT" | python3 -c "import json,sys; print(len(json.load(sys.stdin)['warranty']))")
+[ "$UPL" = "15" ] && ok "warranty stored verbatim" || bad "warranty length: $UPL"
+
+# 24. duplicate endpoint: new number, draft, same items/terms
+DP=$(curl -s -X POST "$BASE/api/quotes/$QTID/duplicate")
+echo "$DP" | grep -q '"status":"draft"' && echo "$DP" | grep -q '"paymentTerms":"Due on receipt"' \
+  && ok "POST duplicate -> fresh draft keeps terms" || bad "duplicate wrong: ${DP:0:300}"
+DPID=$(echo "$DP" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+[ -n "$DPID" ] && [ "$DPID" != "$QTID" ] && ok "duplicate has new id" || bad "duplicate id"
+DPN=$(echo "$DP" | grep -o '"number":"[^"]*"' | head -1 | cut -d'"' -f4)
+QTN=$(echo "$QT" | grep -o '"number":"[^"]*"' | head -1 | cut -d'"' -f4)
+[ -n "$DPN" ] && [ "$DPN" != "$QTN" ] && ok "duplicate has new number ($QTN -> $DPN)" || bad "duplicate number: $DPN vs $QTN"
+DP404=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/quotes/nope123/duplicate")
+[ "$DP404" = "404" ] && ok "duplicate 404s on unknown id" || bad "duplicate 404: $DP404"
+curl -s -X DELETE "$BASE/api/quotes/$QTID" >/dev/null
+curl -s -X DELETE "$BASE/api/quotes/$DPID" >/dev/null
+
+# 25. second-sweep UI wiring
+missing2=""
+for n in payTerms warranty; do
+  grep -q "id=\"$n\"" "$DIR/public/index.html" || missing2="$missing2 html:$n"
+  grep -q "$n" "$DIR/public/app.js" || missing2="$missing2 js:$n"
+done
+grep -q 'data-act="dup"' "$DIR/public/app.js" || missing2="$missing2 dup-button"
+grep -q 'status expired' "$DIR/public/app.js" || missing2="$missing2 expired-badge"
+grep -q 'data-status="expired"' "$DIR/public/index.html" || missing2="$missing2 expired-filter"
+[ -z "$missing2" ] && ok "UI wires terms/warranty/duplicate/expiry" || bad "missing wiring:$missing2"
+
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

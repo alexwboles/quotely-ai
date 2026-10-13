@@ -407,3 +407,7 @@ main { padding: 34px 40px 60px; max-width: 1280px; width: 100%; margin: 0 auto; 
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   border: 1px solid #e4dcc9; border-radius: 0; padding: 10px 12px; margin-bottom: 8px;
 }
+
+/* ---------- second sweep: expiry badge, terms line ---------- */
+.status.expired { background: #fbe3e3; color: #a33; border: 1px solid #eec3c3; }
+.q-terms { margin-top: .8rem; font-size: .92rem; color: #444; }

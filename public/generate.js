@@ -156,12 +156,29 @@
     return { subtotal: subtotal, tax: tax, total: total, deposit: deposit, balance: Math.round((total - deposit) * 100) / 100 };
   }
 
+  /* Second sweep: quote expiry — validity deadline = createdAt + validDays.
+   * Only open quotes (draft/sent) can expire; won/lost are closed. */
+  function quoteExpiryISO(q) {
+    var created = Date.parse((q && q.createdAt) || "");
+    if (isNaN(created)) return null;
+    var days = Number(q.validDays) || 30;
+    return new Date(created + days * 864e5).toISOString().slice(0, 10);
+  }
+  function isQuoteExpired(q, todayISO) {
+    var exp = quoteExpiryISO(q);
+    if (!exp) return false;
+    var today = todayISO || new Date().toISOString().slice(0, 10);
+    var st = q && q.status;
+    return exp < today && (st === "draft" || st === "sent");
+  }
+
   var Quotely = {
-    TRADES: TRADES,
-    TRIP_FEE: TRIP_FEE,
+    TRADES: TRADES,    TRIP_FEE: TRIP_FEE,
     generateLineItems: generateLineItems,
     lineTotal: lineTotal,
-    quoteTotals: quoteTotals
+    quoteTotals: quoteTotals,
+    quoteExpiryISO: quoteExpiryISO,
+    isQuoteExpired: isQuoteExpired
   };
 
   if (typeof module !== "undefined" && module.exports) {

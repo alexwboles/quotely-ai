@@ -126,6 +126,16 @@
               <div class="field"><label for="taxRate">Tax %</label><input id="taxRate" type="number" value="0" min="0" step="0.1"></div>
               <div class="field"><label for="depositRate">Deposit %</label><input id="depositRate" type="number" value="25" min="0" max="100"></div>
             </div>
+            <div class="grid-2">
+              <div class="field"><label for="payTerms">Payment terms</label>
+                <select id="payTerms">
+                  <option>Due on receipt</option>
+                  <option>Net 15</option>
+                  <option>Net 30</option>
+                  <option>Net 60</option>
+                </select></div>
+              <div class="field"><label for="warranty">Warranty</label><input id="warranty" placeholder="e.g. 1-year workmanship warranty"></div>
+            </div>
             <div class="field"><label for="notes">Notes for customer</label>
               <textarea id="notes" rows="2" placeholder="e.g. 1-year workmanship warranty included"></textarea></div>
             <div class="row-end">
@@ -162,6 +172,7 @@
             <button class="fpill" data-status="sent">Sent</button>
             <button class="fpill" data-status="won">Won</button>
             <button class="fpill" data-status="lost">Lost</button>
+            <button class="fpill" data-status="expired">Expired</button>
           </div>
           <input id="searchBox" class="search" placeholder="Search customer or quote #">
         </div>

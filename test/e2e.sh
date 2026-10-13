@@ -127,6 +127,47 @@ print(len(d), b[0]['quotes'] if b else 0, b[0]['won'] if b else 0, a[0]['quotes'
 ")
 [ "$C11" = "2 1 1 1" ] && ok "flow11: customers directory (Bob: 1 quote won, Amy: 1 quote)" || bad "flow11: $C11"
 
+# ---- Flow 12: terms + duplicate lifecycle ----
+Q12=$(curl -s -X POST "$BASE/api/quotes" -H 'Content-Type: application/json' \
+  -d '{"customer":"E2E Terms","trade":"Electrical","description":"Rewire garage","items":[{"description":"Rewire","qty":1,"unit":"job","unitPrice":800}],"taxRate":0,"depositRate":25,"paymentTerms":"Net 15","warranty":"Lifetime on labor"}')
+ID12=$(echo "$Q12" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+NUM12=$(echo "$Q12" | python3 -c "import json,sys; print(json.load(sys.stdin)['number'])")
+echo "$Q12" | grep -q '"paymentTerms":"Net 15"' && ok "flow12: terms saved on create" || bad "flow12: terms missing"
+D12=$(curl -s -X POST "$BASE/api/quotes/$ID12/duplicate")
+DID12=$(echo "$D12" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+DNUM12=$(echo "$D12" | python3 -c "import json,sys; print(json.load(sys.stdin)['number'])")
+DWAR12=$(echo "$D12" | python3 -c "import json,sys; print(json.load(sys.stdin)['warranty'])")
+echo "$D12" | grep -q '"status":"draft"' && [ "$DID12" != "$ID12" ] && [ "$DNUM12" != "$NUM12" ] \
+  && [ "$DWAR12" = "Lifetime on labor" ] && ok "flow12: duplicate fresh draft, new number, terms carried over" \
+  || bad "flow12: duplicate wrong: ${D12:0:300}"
+# expiry: backdate createdAt in storage to force expiry, then confirm logic flags it
+python3 -c "
+import json
+p = '$DIR/data/quotes.json'
+d = json.load(open(p))
+for q in d:
+    if q['id'] == '$ID12':
+        q['createdAt'] = '2026-01-01T00:00:00.000Z'
+        q['status'] = 'sent'
+json.dump(d, open(p, 'w'))
+"
+curl -s "$BASE/api/quotes" > /tmp/quotely-q12.json
+cat > /tmp/quotely-expiry-check.js <<JSEOF
+const Q = require("$DIR/public/generate.js");
+const q = JSON.parse(process.argv[2]);
+console.log(Q.quoteExpiryISO(q) + " " + Q.isQuoteExpired(q));
+JSEOF
+EX12=$(python3 -c "
+import json, subprocess
+d = json.load(open('/tmp/quotely-q12.json'))
+q = [x for x in d if x['id'] == '$ID12'][0]
+gen = subprocess.run(['node', '/tmp/quotely-expiry-check.js', json.dumps(q)], capture_output=True, text=True)
+print(gen.stdout.strip())
+")
+[ "$EX12" = "2026-01-31 true" ] && ok "flow12: backdated sent quote flags expired" || bad "flow12: expiry=$EX12"
+curl -s -X DELETE "$BASE/api/quotes/$ID12" >/dev/null
+curl -s -X DELETE "$BASE/api/quotes/$DID12" >/dev/null
+
 # ---- Flow 7: delete cleans up ----
 curl -s -X DELETE "$BASE/api/quotes/$ID1" >/dev/null
 curl -s -X DELETE "$BASE/api/quotes/$ID2" >/dev/null
