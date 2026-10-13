@@ -1,4 +1,4 @@
-/* Quotely AI - frontend app (no build step, no deps) */
+/* Quotely — frontend app (no build step, no deps) */
 (function () {
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
@@ -14,7 +14,11 @@
     photos: [],
     quotes: [],
     templates: [],
+    customers: [],
     quoteFilter: "",
+    custFilter: "",
+    editingId: null,
+    detailId: null,
     settings: loadSettings()
   };
 
@@ -27,29 +31,98 @@
     localStorage.setItem("quotely_settings", JSON.stringify(state.settings));
   }
 
+  /* ---------- toast ---------- */
+  function showToast(msg) {
+    var host = $("toastHost");
+    var t = document.createElement("div");
+    t.className = "toast";
+    t.innerHTML = '<span class="tick">&#10003;</span><span>' + esc(msg) + "</span>";
+    host.appendChild(t);
+    setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 3600);
+  }
+
   /* ---------- sidebar nav ---------- */
+  var VIEWS = ["dashboard", "new", "quotes", "detail", "customers", "settings"];
   var navItems = document.querySelectorAll(".nav-item");
   function showView(name) {
-    navItems.forEach(function (x) { x.classList.toggle("active", x.dataset.view === name); });
-    ["dashboard", "new", "quotes", "settings"].forEach(function (k) {
-      $("view-" + k).classList.toggle("hidden", k !== name);
+    navItems.forEach(function (x) { x.classList.toggle("active", x.dataset.view === name || (name === "detail" && x.dataset.view === "quotes")); });
+    VIEWS.forEach(function (k) {
+      var el = $("view-" + k);
+      if (el) el.classList.toggle("hidden", k !== name);
     });
     var shown = $("view-" + name);
-    shown.classList.remove("view-enter");
-    void shown.offsetWidth;
-    shown.classList.add("view-enter");
+    if (shown) {
+      shown.classList.remove("view-enter");
+      void shown.offsetWidth;
+      shown.classList.add("view-enter");
+    }
     if (name === "quotes" || name === "dashboard") loadQuotes();
+    if (name === "customers") renderCustomersView();
     window.scrollTo({ top: 0 });
   }
   navItems.forEach(function (t) {
-    t.addEventListener("click", function () { showView(t.dataset.view); });
+    t.addEventListener("click", function () {
+      if (t.dataset.view === "new") startNew();
+      else showView(t.dataset.view);
+    });
   });
   document.querySelectorAll("[data-goto-new]").forEach(function (b) {
-    b.addEventListener("click", function () { showView("new"); });
+    b.addEventListener("click", startNew);
   });
   document.querySelectorAll("[data-goto-quotes]").forEach(function (b) {
     b.addEventListener("click", function () { showView("quotes"); });
   });
+  document.querySelectorAll("[data-goto-customers]").forEach(function (b) {
+    b.addEventListener("click", function () { showView("customers"); });
+  });
+
+  /* ---------- new vs edit mode ---------- */
+  function startNew() {
+    state.editingId = null;
+    state.items = [];
+    state.photos = [];
+    ["description", "customer", "phone", "email", "followUp", "notes", "warranty"].forEach(function (id) { $(id).value = ""; });
+    $("taxRate").value = 0; $("depositRate").value = 25; $("validDays").value = 30;
+    $("payTerms").value = "Due on receipt";
+    $("genSource").textContent = ""; $("saveMsg").textContent = "";
+    $("newTitle").textContent = "New quote";
+    $("saveBtn").textContent = "Save quote";
+    renderItems(); renderPhotoGrid(); renderPreview();
+    showView("new");
+  }
+
+  function startEdit(id) {
+    var q = state.quotes.filter(function (x) { return x.id === id; })[0];
+    if (!q) return;
+    state.editingId = id;
+    state.items = (q.items || []).map(function (i) {
+      return { description: i.description, qty: i.qty, unit: i.unit, unitPrice: i.unitPrice };
+    });
+    state.photos = (q.photos || []).map(function (p) {
+      return { dataUrl: p.dataUrl, caption: p.caption || "", tag: p.tag || "", addedAt: p.addedAt || Date.now(), analysis: null, ai: null };
+    });
+    $("trade").value = q.trade || "General Handyman";
+    $("description").value = q.description || "";
+    $("customer").value = q.customer || "";
+    $("phone").value = q.phone || "";
+    $("email").value = q.email || "";
+    $("followUp").value = q.followUp || "";
+    $("validDays").value = q.validDays || 30;
+    $("taxRate").value = q.taxRate || 0;
+    $("depositRate").value = q.depositRate != null ? q.depositRate : 25;
+    $("payTerms").value = q.paymentTerms || "Due on receipt";
+    $("warranty").value = q.warranty || "";
+    $("notes").value = q.notes || "";
+    $("genSource").textContent = ""; $("saveMsg").textContent = "";
+    $("newTitle").textContent = "Edit quote " + (q.number || "");
+    $("saveBtn").textContent = "Save changes";
+    renderItems(); renderPhotoGrid(); renderPreview();
+    // re-run on-device analysis for loaded photos
+    state.photos.forEach(function (p) {
+      if (!p.analysis) analyzeLocal(p.dataUrl).then(function (a) { p.analysis = a; renderPhotoGrid(); });
+    });
+    showView("new");
+  }
 
   /* ---------- trade selector ---------- */
   var tradeSel = $("trade");
@@ -135,7 +208,7 @@
       if (state.photos.length >= 8) return;
       processImageFile(f).then(function (p) {
         if (state.photos.length >= 8) return;
-        var photo = { dataUrl: p.dataUrl, caption: "", tag: "", addedAt: Date.now(), analysis: null, ai: null, _freshAt: Date.now() };
+        var photo = { dataUrl: p.dataUrl, caption: "", tag: "", addedAt: Date.now(), analysis: null, ai: null };
         state.photos.push(photo);
         renderPhotoGrid(); renderPreview();
         analyzeLocal(p.dataUrl).then(function (a) {
@@ -155,13 +228,7 @@
   ["dragleave", "drop"].forEach(function (ev) {
     dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.remove("drag"); });
   });
-  dz.addEventListener("drop", function (e) {
-    addPhotoFiles(e.dataTransfer.files);
-    dz.classList.remove("dropped");
-    void dz.offsetWidth;
-    dz.classList.add("dropped");
-    setTimeout(function () { dz.classList.remove("dropped"); }, 600);
-  });
+  dz.addEventListener("drop", function (e) { addPhotoFiles(e.dataTransfer.files); });
 
   function fmtTime(ts) {
     if (!ts) return "";
@@ -173,25 +240,18 @@
 
   function renderPhotoGrid() {
     var grid = $("photoGrid");
-    $("photoCount").textContent = state.photos.length ? "(" + state.photos.length + "/8)" : "";
+    $("photoCount").textContent = state.photos.length ? state.photos.length + " / 8" : "";
     grid.innerHTML = "";
     if (!state.photos.length) {
-      grid.innerHTML =
-        '<div class="frame-empty" data-browse><span>+</span><em>FRAME 01</em></div>' +
-        '<div class="frame-empty" data-browse><span>+</span><em>FRAME 02</em></div>' +
-        '<div class="frame-empty" data-browse><span>+</span><em>FRAME 03</em></div>';
-      grid.querySelectorAll("[data-browse]").forEach(function (el) {
-        el.addEventListener("click", function () { photoInput.click(); });
-      });
+      grid.innerHTML = '<div class="photo-empty">No photos yet — add site photos to document the job. They print on the quote.</div>';
       return;
     }
     state.photos.forEach(function (p, i) {
       var card = document.createElement("div");
-      card.className = "photo-card" + (p.tag ? " tag-" + p.tag : "");
-      if (Date.now() - (p._freshAt || 0) < 2200) card.classList.add("developing");
+      card.className = "photo-card";
       var a = p.analysis;
       var flags = a && a.flags.length
-        ? '<span class="flag warn">' + a.flags.join(" · ") + " — retake?</span>"
+        ? '<span class="flag warn">' + esc(a.flags.join(" · ")) + " — retake?</span>"
         : (a ? '<span class="flag ok">looks good</span>' : '<span class="flag">analyzing…</span>');
       var swatches = a ? a.palette.map(function (hex) {
         return '<span class="swatch" style="background:' + hex + '" title="' + hex + '"></span>';
@@ -202,28 +262,24 @@
       else if (p.ai) {
         aiBlock = '<div class="ai-panel"><strong>AI sees:</strong> ' + esc(p.ai.observations) +
           (p.ai.items && p.ai.items.length
-            ? '<div class="ai-items">' + p.ai.items.map(function (it, k) {
+            ? '<div class="ai-items">' + p.ai.items.map(function (it) {
                 return "<div>" + esc(it.description) + " — " + money(it.unitPrice) + "</div>";
-              }).join("") + '</div><button class="small primary" data-aiadd="' + i + '">Add to line items</button>'
+              }).join("") + '</div><button class="btn btn-sm" data-aiadd="' + i + '">Add to line items</button>'
             : "") + "</div>";
       } else if (p.aiError) {
         aiBlock = '<div class="ai-panel warn">' + esc(p.aiError) + "</div>";
       }
       card.innerHTML =
-        '<div class="frame-head"><span class="frame-no">' + String(i + 1).padStart(2, "0") + '</span>' +
-        '<span class="frame-time">' + esc(fmtTime(p.addedAt)) + "</span></div>" +
-        '<div class="frame"><img src="' + p.dataUrl + '" alt="job photo"></div>' +
-        '<input class="cap" data-cap="' + i + '" placeholder="Caption…" value="' + esc(p.caption) + '">' +
+        '<img src="' + p.dataUrl + '" alt="job photo">' +
+        '<input class="cap" data-cap="' + i + '" placeholder="Add a caption…" value="' + esc(p.caption) + '" aria-label="Photo caption">' +
         '<div class="photo-meta">' +
-          '<div class="tagrow">' +
-            '<button class="tag' + (p.tag === "" ? " on" : "") + '" data-tag="' + i + '|">—</button>' +
-            '<button class="tag' + (p.tag === "before" ? " on" : "") + '" data-tag="' + i + '|before">Before</button>' +
-            '<button class="tag' + (p.tag === "after" ? " on" : "") + '" data-tag="' + i + '|after">After</button>' +
-          "</div>" +
-          '<button class="small ghost" data-aiphoto="' + i + '">AI look</button>' +
-          '<button class="small danger-ghost" data-delphoto="' + i + '">✕</button>' +
+          '<button class="tag' + (p.tag === "" ? " on" : "") + '" data-tag="' + i + '|">—</button>' +
+          '<button class="tag' + (p.tag === "before" ? " on" : "") + '" data-tag="' + i + '|before">Before</button>' +
+          '<button class="tag' + (p.tag === "after" ? " on" : "") + '" data-tag="' + i + '|after">After</button>' +
+          '<button class="iconbtn" data-aiphoto="' + i + '">AI look</button>' +
+          '<button class="iconbtn danger" data-delphoto="' + i + '" aria-label="Remove photo">Remove</button>' +
         "</div>" +
-        '<div class="photo-analysis">' + flags + '<span class="dims">' + dims + "</span>" +
+        '<div class="photo-analysis"><span>' + esc(fmtTime(p.addedAt)) + "</span>" + flags + "<span>" + dims + "</span>" +
         (swatches ? '<span class="swatches">' + swatches + "</span>" : "") + "</div>" +
         aiBlock;
       grid.appendChild(card);
@@ -267,8 +323,6 @@
     if (!p || p.aiLoading) return;
     p.aiLoading = true; p.aiError = null; p.ai = null;
     renderPhotoGrid();
-    var card = $("photoGrid").children[i];
-    if (card) card.classList.add("scanning");
     try {
       var r = await fetch("/api/analyze-photo", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -296,12 +350,12 @@
     state.items.forEach(function (it, i) {
       var tr = document.createElement("tr");
       tr.innerHTML =
-        '<td><input data-i="' + i + '" data-f="description" value="' + esc(it.description) + '"></td>' +
-        '<td><input data-i="' + i + '" data-f="qty" type="number" min="0" step="any" value="' + it.qty + '"></td>' +
-        '<td><input data-i="' + i + '" data-f="unit" value="' + esc(it.unit) + '"></td>' +
-        '<td><input data-i="' + i + '" data-f="unitPrice" type="number" min="0" step="any" value="' + it.unitPrice + '"></td>' +
-        '<td class="row-total">' + money(Quotely.lineTotal(it)) + '</td>' +
-        '<td><button class="small danger-ghost" data-del="' + i + '">✕</button></td>';
+        '<td><input data-i="' + i + '" data-f="description" value="' + esc(it.description) + '" placeholder="Describe the work…" aria-label="Line item description"></td>' +
+        '<td><input data-i="' + i + '" data-f="qty" type="number" min="0" step="any" value="' + it.qty + '" aria-label="Quantity"></td>' +
+        '<td><input data-i="' + i + '" data-f="unit" value="' + esc(it.unit) + '" aria-label="Unit"></td>' +
+        '<td><input data-i="' + i + '" data-f="unitPrice" type="number" min="0" step="any" value="' + it.unitPrice + '" aria-label="Unit price"></td>' +
+        '<td class="num row-total"><strong>' + money(Quotely.lineTotal(it)) + "</strong></td>" +
+        '<td><button class="btn-danger btn-sm" data-del="' + i + '" aria-label="Remove line">✕</button></td>';
       body.appendChild(tr);
     });
     body.querySelectorAll("input").forEach(function (inp) {
@@ -309,8 +363,7 @@
         var i = Number(inp.dataset.i), f = inp.dataset.f;
         state.items[i][f] = (f === "qty" || f === "unitPrice") ? Number(inp.value) : inp.value;
         renderPreview();
-        // refresh row total cell
-        inp.closest("tr").querySelector(".row-total").textContent = money(Quotely.lineTotal(state.items[i]));
+        inp.closest("tr").querySelector(".row-total").innerHTML = "<strong>" + money(Quotely.lineTotal(state.items[i])) + "</strong>";
       });
     });
     body.querySelectorAll("[data-del]").forEach(function (b) {
@@ -352,61 +405,88 @@
     renderItems(); renderPreview();
     msg.textContent = items.length + " line item" + (items.length === 1 ? "" : "s") +
       " drafted (" + (source === "openai" ? "AI enhanced" : "built-in estimator") +
-      "). Adjust quantities and prices, then preview below.";
+      "). Adjust quantities and prices — the preview updates live.";
   });
 
-  /* ---------- totals + preview ---------- */
+  /* ---------- the quote document (shared by preview + detail) ---------- */
+  function validUntilOf(q) {
+    var base = q.createdAt ? new Date(q.createdAt).getTime() : Date.now();
+    return new Date(base + (Number(q.validDays) || 30) * 864e5).toLocaleDateString();
+  }
+
+  function sheetHTML(q) {
+    var s = state.settings;
+    var rows = (q.items || []).map(function (it) {
+      return "<tr><td><div class=\"item-name\">" + esc(it.description) + "</div></td>" +
+        '<td class="num">' + it.qty + " " + esc(it.unit) + "</td>" +
+        '<td class="num">' + money(it.unitPrice) + "</td>" +
+        '<td class="num"><strong>' + money(Quotely.lineTotal(it)) + "</strong></td></tr>";
+    }).join("");
+    var t = q.totals || Quotely.quoteTotals(q.items || [], q.taxRate, q.depositRate);
+    var coLine = [s.companyPhone, s.companyEmail, s.companyAddress].filter(Boolean).join(" · ");
+    var custLine = [q.phone, q.email].filter(Boolean).join(" · ");
+    return '<div class="doc-head"><div>' +
+        (s.logo ? '<img class="doc-logo" src="' + s.logo + '" alt="company logo">' : "") +
+        '<div class="doc-co">' + esc(s.companyName || "Your Company") + "</div>" +
+        (coLine ? '<div class="doc-co-sub">' + esc(coLine) + "</div>" : "") +
+      "</div>" +
+      '<div class="doc-meta"><div class="doc-kicker">QUOTE</div>' +
+        "<div><strong>" + esc(q.number || "") + "</strong></div>" +
+        "<div>Date: " + new Date(q.createdAt || Date.now()).toLocaleDateString() + "</div>" +
+        "<div>Valid until: " + validUntilOf(q) + "</div></div></div>" +
+      '<div class="doc-parties"><div><h4>Prepared for</h4>' +
+        '<div class="who">' + esc(q.customer || "Customer") + "</div>" +
+        (custLine ? '<div class="sub">' + esc(custLine) + "</div>" : "") +
+      "</div><div><h4>Job</h4>" +
+        '<div class="who">' + esc(q.trade || "") + "</div>" +
+        (q.description ? '<div class="sub">' + esc(String(q.description).slice(0, 300)) + "</div>" : "") +
+      "</div></div>" +
+      '<table class="doc-items"><thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Amount</th></tr></thead>' +
+      "<tbody>" + (rows || '<tr><td colspan="4" style="color:var(--muted)">No line items yet — generate or add some.</td></tr>') + "</tbody></table>" +
+      '<table class="doc-totals"><tr><td>Subtotal</td><td class="num" id="totSub">' + money(t.subtotal) + "</td></tr>" +
+      "<tr><td>Tax (" + esc(q.taxRate || "0") + "%)</td>" + '<td class="num" id="totTax">' + money(t.tax) + "</td></tr>" +
+      '<tr class="grand"><td>Total</td><td class="num" id="totTotal">' + money(t.total) + "</td></tr>" +
+      "<tr><td>Deposit due (" + esc(q.depositRate || "0") + "%)</td>" + '<td class="num" id="totDep">' + money(t.deposit) + "</td></tr>" +
+      '<tr><td>Balance on completion</td><td class="num" id="totBal">' + money(t.balance) + "</td></tr></table>" +
+      '<div class="doc-terms"><strong>Payment terms:</strong> ' + esc(q.paymentTerms || "Due on receipt") +
+      (q.warranty ? ' &nbsp;·&nbsp; <strong>Warranty:</strong> ' + esc(q.warranty) : "") + "</div>" +
+      (q.notes ? '<div class="doc-notes"><strong>Notes:</strong> ' + esc(q.notes) + "</div>" : "") +
+      ((q.photos || []).length
+        ? '<div class="doc-photos"><h4>Job photos</h4><div class="doc-photos-grid">' +
+          q.photos.map(function (p) {
+            return "<figure><img src=\"" + p.dataUrl + "\" alt=\"job photo\">" +
+              ((p.caption || p.tag || p.addedAt)
+                ? "<figcaption>" + (p.tag ? esc(p.tag.toUpperCase()) + " · " : "") + esc(p.caption || "") +
+                  (p.addedAt ? " · " + esc(fmtTime(p.addedAt)) : "") + "</figcaption>"
+                : "") + "</figure>";
+          }).join("") + "</div></div>"
+        : "") +
+      '<div class="doc-sign"><div>Accepted by (customer signature)</div><div>Date</div></div>';
+  }
+
+  /* ---------- builder preview ---------- */
   function currentTotals() {
     return Quotely.quoteTotals(state.items, $("taxRate").value, $("depositRate").value);
   }
 
   function renderPreview() {
-    var t = currentTotals();
-    var s = state.settings;
-    var validDays = Number($("validDays").value) || 30;
-    var validUntil = new Date(Date.now() + validDays * 864e5).toLocaleDateString();
-    var rows = state.items.map(function (it) {
-      return "<tr><td>" + esc(it.description) + "</td>" +
-        '<td class="num">' + it.qty + " " + esc(it.unit) + "</td>" +
-        '<td class="num">' + money(it.unitPrice) + "</td>" +
-        '<td class="num">' + money(Quotely.lineTotal(it)) + "</td></tr>";
-    }).join("");
-    $("preview").innerHTML =
-      '<div class="q-head"><div>' +
-        (s.logo ? '<img class="q-logo" src="' + s.logo + '" alt="logo"><br>' : "") +
-        '<div class="q-co">' + esc(s.companyName || "Your Company") + "</div>" +
-        '<div class="q-co-sub">' + esc([s.companyPhone, s.companyEmail, s.companyAddress].filter(Boolean).join(" · ")) + "</div>" +
-      "</div>" +
-      '<div class="q-meta"><div class="qnum">QUOTE</div>' +
-        "<div>#" + esc(nextLocalNumber()) + "</div>" +
-        "<div>Date: " + new Date().toLocaleDateString() + "</div>" +
-        "<div>Valid until: " + validUntil + "</div></div></div>" +
-      '<div class="q-parties"><div><h4>Prepared for</h4>' +
-        "<strong>" + esc($("customer").value || "Customer") + "</strong><br>" +
-        esc($("phone").value) + ( $("phone").value && $("email").value ? "<br>" : "") + esc($("email").value) +
-      "</div><div><h4>Job</h4>" + esc(tradeSel.value) + "<br>" +
-        esc($("description").value).slice(0, 300) + "</div></div>" +
-      '<table class="q-items"><thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Amount</th></tr></thead>' +
-      "<tbody>" + (rows || '<tr><td colspan="4">No line items yet — generate or add some above.</td></tr>') + "</tbody></table>" +
-      '<table class="q-totals"><tr><td>Subtotal</td><td class="num" id="totSub">' + money(t.subtotal) + "</td></tr>" +
-      "<tr><td>Tax (" + esc($("taxRate").value || "0") + "%)</td>" + '<td class="num" id="totTax">' + money(t.tax) + "</td></tr>" +
-      '<tr class="grand"><td>Total</td><td class="num" id="totTotal">' + money(t.total) + "</td></tr>" +
-      "<tr><td>Deposit due (" + esc($("depositRate").value || "0") + "%)</td>" + '<td class="num" id="totDep">' + money(t.deposit) + "</td></tr>" +
-      '<tr><td>Balance on completion</td><td class="num" id="totBal">' + money(t.balance) + "</td></tr></table>" +
-      '<div class="q-terms"><strong>Payment terms:</strong> ' + esc($("payTerms").value || "Due on receipt") +
-      ($("warranty").value ? ' · <strong>Warranty:</strong> ' + esc($("warranty").value) : "") + "</div>" +
-      ($("notes").value ? '<div class="q-notes"><strong>Notes:</strong> ' + esc($("notes").value) + "</div>" : "") +
-      (state.photos.length
-        ? '<div class="q-photos"><h4>Job photos</h4><div class="q-photos-grid">' +
-          state.photos.map(function (p) {
-            return "<figure><img src=\"" + p.dataUrl + "\" alt=\"job photo\">" +
-              ((p.caption || p.tag || p.addedAt)
-                ? "<figcaption>" + (p.tag ? '<span class="ptag">' + esc(p.tag) + "</span> " : "") + esc(p.caption) +
-                  (p.addedAt ? '<span class="ftime">' + esc(fmtTime(p.addedAt)) + "</span>" : "") + "</figcaption>"
-                : "") + "</figure>";
-          }).join("") + "</div></div>"
-        : "") +
-      '<div class="q-sign"><div>Accepted by (customer signature)</div><div>Date</div></div>';
+    var editing = state.editingId
+      ? state.quotes.filter(function (x) { return x.id === state.editingId; })[0]
+      : null;
+    var q = {
+      number: editing ? editing.number : nextLocalNumber(),
+      createdAt: editing ? editing.createdAt : new Date().toISOString(),
+      customer: $("customer").value, phone: $("phone").value, email: $("email").value,
+      trade: tradeSel.value, description: $("description").value,
+      items: state.items,
+      photos: state.photos.map(function (p) { return { dataUrl: p.dataUrl, caption: p.caption, tag: p.tag, addedAt: p.addedAt }; }),
+      taxRate: $("taxRate").value, depositRate: $("depositRate").value,
+      totals: currentTotals(),
+      followUp: $("followUp").value, notes: $("notes").value, validDays: $("validDays").value,
+      paymentTerms: $("payTerms").value, warranty: $("warranty").value
+    };
+    $("preview").innerHTML = sheetHTML(q);
+    var t = q.totals;
     tweenMoney("totSub", t.subtotal);
     tweenMoney("totTax", t.tax);
     tweenMoney("totTotal", t.total);
@@ -414,7 +494,7 @@
     tweenMoney("totBal", t.balance);
   }
 
-  /* animated totals: numbers tick up/down instead of jumping */
+  /* animated totals: numbers tick instead of jumping */
   var lastMoney = {};
   var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   function tweenMoney(id, to) {
@@ -445,11 +525,11 @@
     return "Q-" + year + "-" + String(n).padStart(4, "0");
   }
 
-  ["taxRate", "depositRate", "notes", "customer", "phone", "email", "description", "validDays"]
+  ["taxRate", "depositRate", "notes", "customer", "phone", "email", "description", "validDays", "payTerms", "warranty"]
     .forEach(function (id) { $(id).addEventListener("input", renderPreview); });
   tradeSel.addEventListener("change", renderPreview);
 
-  /* ---------- save ---------- */
+  /* ---------- save (POST new / PUT edit) ---------- */
   $("saveBtn").addEventListener("click", async function () {
     var msg = $("saveMsg");
     if (!state.items.length) { msg.textContent = "Add at least one line item first."; return; }
@@ -463,19 +543,26 @@
       paymentTerms: $("payTerms").value, warranty: $("warranty").value
     };
     try {
-      var r = await fetch("/api/quotes", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      if (!r.ok) throw new Error("save failed");
-      var q = await r.json();
-      msg.textContent = "Saved as " + q.number + " ✓";
-      var saveBtn = $("saveBtn");
-      saveBtn.classList.remove("saved-pop");
-      void saveBtn.offsetWidth;
-      saveBtn.classList.add("saved-pop");
+      var r, q;
+      if (state.editingId) {
+        r = await fetch("/api/quotes/" + state.editingId, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!r.ok) throw new Error("save failed");
+        q = await r.json();
+        showToast("Quote " + q.number + " updated");
+      } else {
+        r = await fetch("/api/quotes", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!r.ok) throw new Error("save failed");
+        q = await r.json();
+        showToast("Quote " + q.number + " created");
+      }
       await loadQuotes();
-      renderPreview();
+      openDetail(q.id);
     } catch (e) {
       msg.textContent = "Couldn't reach the server — is it running? (npm start)";
     }
@@ -485,20 +572,20 @@
 
   $("clearBtn").addEventListener("click", function () {
     if (!confirm("Clear this quote form?")) return;
-    state.items = [];
-    state.photos = [];
-    renderPhotoGrid();
-    ["description", "customer", "phone", "email", "followUp", "notes", "warranty"].forEach(function (id) { $(id).value = ""; });
-    $("taxRate").value = 0; $("depositRate").value = 25; $("validDays").value = 30;
-    $("payTerms").value = "Due on receipt";
-    $("genSource").textContent = ""; $("saveMsg").textContent = "";
-    renderItems(); renderPreview();
+    startNew();
   });
+
+  /* ---------- dashboard ---------- */
+  function totalsOf(x) { return (x.totals && Number(x.totals.total)) || 0; }
+
+  function badgeHTML(status, expired) {
+    return '<span class="badge ' + status + '">' + status + "</span>" +
+      (expired ? ' <span class="badge expired">expired</span>' : "");
+  }
 
   function renderDashboard() {
     var qs = state.quotes;
     var today = new Date().toISOString().slice(0, 10);
-    function totalsOf(x) { return (x.totals && Number(x.totals.total)) || 0; }
     $("dashDate").textContent = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }) +
       "  ·  " + qs.length + " quote" + (qs.length === 1 ? "" : "s") + " on the books";
 
@@ -519,6 +606,7 @@
     var due = qs.filter(function (x) { return x.followUp && x.followUp <= today && (x.status === "draft" || x.status === "sent"); });
     $("kpiFollow").textContent = due.length;
     $("kpiFollowSub").textContent = due.length ? "reach out today" : "all caught up";
+    $("kpiFollow").classList.toggle("good", false);
 
     var order = ["draft", "sent", "won", "lost"];
     var labels = { draft: "Draft", sent: "Sent", won: "Won", lost: "Lost" };
@@ -528,6 +616,7 @@
       var val = grp.reduce(function (a, x) { return a + totalsOf(x); }, 0);
       var cell = document.createElement("button");
       cell.className = "pipe-cell";
+      cell.setAttribute("aria-label", labels[s] + " quotes: " + grp.length);
       cell.innerHTML = '<div class="pipe-status">' + labels[s] + '</div><div class="pipe-num">' + grp.length + '</div><div class="pipe-val">' + money(val) + "</div>";
       cell.addEventListener("click", function () { setQuoteFilter(s); });
       $("pipeGrid").appendChild(cell);
@@ -535,33 +624,47 @@
 
     var recent = qs.slice().sort(function (a, b) { return String(b.createdAt || "").localeCompare(String(a.createdAt || "")); }).slice(0, 5);
     var rb = $("recentBody");
-    rb.innerHTML = recent.length ? "" : '<tr class="empty-row"><td colspan="4">No quotes yet.</td></tr>';
-    recent.forEach(function (x) {
-      var tr = document.createElement("tr");
-      tr.innerHTML = '<td class="t-num">' + esc(x.number) + '</td><td class="t-cust">' + esc(x.customer || "—") + "</td>" +
-        '<td class="num t-num">' + money(totalsOf(x)) + '</td><td><span class="status ' + x.status + '">' + x.status + "</span></td>";
-      rb.appendChild(tr);
-    });
+    if (!recent.length) {
+      rb.innerHTML = '<tr><td colspan="4"><div class="empty-state"><strong>No quotes yet</strong><p>Describe a job and Quotely drafts the line items.</p><button class="btn btn-sm" data-goto-new2>New quote</button></div></td></tr>';
+      var nb = rb.querySelector("[data-goto-new2]");
+      if (nb) nb.addEventListener("click", startNew);
+    } else {
+      rb.innerHTML = "";
+      recent.forEach(function (x) {
+        var tr = document.createElement("tr");
+        tr.innerHTML = '<td><a class="qlink" data-open="' + x.id + '" href="#">' + esc(x.number) + "</a></td>" +
+          '<td class="t-cust">' + esc(x.customer || "—") + "</td>" +
+          '<td class="num t-num">' + money(totalsOf(x)) + "</td>" +
+          "<td>" + badgeHTML(x.status, Quotely.isQuoteExpired(x)) + "</td>";
+        rb.appendChild(tr);
+      });
+      rb.querySelectorAll("[data-open]").forEach(function (a) {
+        a.addEventListener("click", function (e) { e.preventDefault(); openDetail(a.dataset.open); });
+      });
+    }
 
     var fus = qs.filter(function (x) { return x.followUp && (x.status === "draft" || x.status === "sent"); })
       .sort(function (a, b) { return String(a.followUp || "").localeCompare(String(b.followUp || "")); }).slice(0, 6);
     var fl = $("followList");
     fl.innerHTML = "";
-    if (!fus.length) { fl.innerHTML = '<div class="fu-empty">Nothing due — every quote has its follow-up handled.</div>'; return; }
-    fus.forEach(function (x) {
-      var cls = followUpClass(x.followUp);
-      var d = document.createElement("div");
-      d.className = "fu-item";
-      d.innerHTML = '<div><div class="fu-who">' + esc(x.customer || "No name") + '</div><div class="fu-what">' + esc(x.number) + "</div></div>" +
-        '<div class="' + (cls === "due" ? "fu-due" : cls === "soon" ? "fu-soon" : "fu-none") + '">' + esc(x.followUp) + "</div>";
-      fl.appendChild(d);
-    });
-    renderCustomers();
+    if (!fus.length) {
+      fl.innerHTML = '<div class="fu-empty">Nothing due — every quote has its follow-up handled.</div>';
+    } else {
+      fus.forEach(function (x) {
+        var cls = followUpClass(x.followUp);
+        var d = document.createElement("div");
+        d.className = "fu-item";
+        d.innerHTML = '<div><div class="fu-who">' + esc(x.customer || "No name") + '</div><div class="fu-what">' + esc(x.number) + "</div></div>" +
+          '<div class="' + (cls === "due" ? "fu-due" : cls === "soon" ? "fu-soon" : "fu-none") + '">' + esc(x.followUp) + "</div>";
+        fl.appendChild(d);
+      });
+    }
+    renderTopCustomers();
   }
 
   function setQuoteFilter(s) {
     state.quoteFilter = s || "";
-    document.querySelectorAll("#statusPills .fpill").forEach(function (p) {
+    document.querySelectorAll("#statusPills .tab").forEach(function (p) {
       p.classList.toggle("active", p.dataset.status === (s || ""));
     });
     renderQuotesList();
@@ -593,17 +696,23 @@
     var list = state.quotes.filter(function (x) {
       if (filter === "expired") { if (!Quotely.isQuoteExpired(x)) return false; }
       else if (filter && x.status !== filter) return false;
-      if (q && (x.customer + " " + x.number).toLowerCase().indexOf(q) === -1) return false;
+      if (q && (String(x.customer || "") + " " + String(x.number || "")).toLowerCase().indexOf(q) === -1) return false;
       return true;
     });
     $("quoteCount").textContent = state.quotes.length || "";
     var names = ["draft", "sent", "won", "lost"];
     var expiredCount = state.quotes.filter(Quotely.isQuoteExpired).length;
     $("quotesSub").textContent = state.quotes.length
-      ? state.quotes.length + " total  \u00b7  " + names.map(function (s) {
+      ? state.quotes.length + " total  ·  " + names.map(function (s) {
           return state.quotes.filter(function (x) { return x.status === s; }).length + " " + s;
-        }).join("  \u00b7  ") + (expiredCount ? "  \u00b7  " + expiredCount + " expired" : "")
-      : "No quotes yet \u2014 create your first one.";
+        }).join("  ·  ") + (expiredCount ? "  ·  " + expiredCount + " expired" : "")
+      : "No quotes yet — create your first one.";
+
+    var outstanding = state.quotes
+      .filter(function (x) { return x.status === "draft" || x.status === "sent"; })
+      .reduce(function (a, x) { return a + totalsOf(x); }, 0);
+    $("listCount").textContent = list.length + " quote" + (list.length === 1 ? "" : "s") + " shown";
+    $("listOutstanding").textContent = money(outstanding);
 
     var today = new Date().toISOString().slice(0, 10);
     var due = state.quotes.filter(function (x) {
@@ -618,7 +727,7 @@
     var tb = $("quotesList");
     tb.innerHTML = "";
     if (!list.length) {
-      tb.innerHTML = '<tr class="empty-row"><td colspan="7">No quotes match this filter.</td></tr>';
+      tb.innerHTML = '<tr><td colspan="7"><div class="empty-state"><strong>No quotes match</strong><p>Try a different search or status filter.</p></div></td></tr>';
       return;
     }
     list.forEach(function (x) {
@@ -626,33 +735,37 @@
       var fuCls = followUpClass(x.followUp);
       var fu = x.followUp
         ? '<span class="' + (fuCls === "due" ? "fu-due" : fuCls === "soon" ? "fu-soon" : "fu-none") + '">' + esc(x.followUp) + "</span>"
-        : '<span class="fu-none">\u2014</span>';
+        : '<span class="fu-none">—</span>';
+      var acts = '<button class="btn-ghost btn-sm" data-act="open">Open</button>';
+      if (x.status === "draft") acts += '<button class="btn-ghost btn-sm" data-act="sent">Mark sent</button>';
+      if (x.status !== "won") acts += '<button class="btn-ghost btn-sm" data-act="won">Won</button>';
+      if (x.status !== "lost") acts += '<button class="btn-ghost btn-sm" data-act="lost">Lost</button>';
+      if (x.status === "won" || x.status === "lost") acts += '<button class="btn-ghost btn-sm" data-act="sent">Reopen</button>';
+      acts += '<button class="btn-ghost btn-sm" data-act="dup">Duplicate</button>' +
+        '<button class="btn-ghost btn-sm" data-act="history">History</button>' +
+        '<button class="btn-danger btn-sm" data-act="del">Delete</button>';
       tr.innerHTML =
-        '<td class="t-num">' + esc(x.number) + "</td>" +
-        '<td class="t-cust">' + esc(x.customer || "\u2014") + "</td>" +
-        '<td class="t-sub">' + esc(x.trade || "\u2014") + "</td>" +
-        '<td class="num t-num">' + money((x.totals && x.totals.total) || 0) + "</td>" +
-        '<td><span class="status ' + x.status + '">' + x.status + "</span>" +
-        (Quotely.isQuoteExpired(x) ? ' <span class="status expired">expired</span>' : "") + "</td>" +
+        '<td><a class="qlink" data-act="open" href="#">' + esc(x.number) + "</a></td>" +
+        '<td class="t-cust">' + esc(x.customer || "—") + "</td>" +
+        '<td class="t-sub">' + esc(x.trade || "—") + "</td>" +
+        '<td class="num t-num">' + money(totalsOf(x)) + "</td>" +
+        "<td>" + badgeHTML(x.status, Quotely.isQuoteExpired(x)) + "</td>" +
         "<td>" + fu + "</td>" +
-        '<td><div class="row-actions">' +
-          (x.status === "draft" ? '<button class="small ghost" data-act="sent">Mark sent</button>' : "") +
-          (x.status !== "won" ? '<button class="small ghost" data-act="won">Won</button>' : "") +
-          (x.status !== "lost" ? '<button class="small ghost" data-act="lost">Lost</button>' : "") +
-          ((x.status === "won" || x.status === "lost") ? '<button class="small ghost" data-act="sent">Reopen</button>' : "") +
-          '<button class="small ghost" data-act="dup">Duplicate</button>' +
-          '<button class="small danger-ghost" data-act="del">Delete</button>' +
-          '<button class="small ghost" data-act="history">History</button>' +
-        "</div></td>";
+        '<td><div class="row-actions">' + acts + "</div></td>";
       tr.querySelectorAll("[data-act]").forEach(function (b) {
-        b.addEventListener("click", function () { quoteAction(x.id, b.dataset.act); });
+        b.addEventListener("click", function (e) {
+          e.preventDefault();
+          var act = b.dataset.act;
+          if (act === "open") openDetail(x.id);
+          else quoteAction(x.id, act);
+        });
       });
       tb.appendChild(tr);
     });
   }
 
   async function quoteAction(id, act) {
-    if (act === "del" && !confirm("Delete this quote?")) return;
+    if (act === "del" && !confirm("Delete this quote? This can't be undone.")) return;
     if (act === "history") { openHistory(id); return; }
     try {
       if (act === "del") {
@@ -660,14 +773,65 @@
       } else if (act === "dup") {
         var dr = await fetch("/api/quotes/" + id + "/duplicate", { method: "POST" });
         if (!dr.ok) throw new Error("duplicate failed");
+        var dq = await dr.json();
+        showToast("Duplicated as " + dq.number);
       } else {
         await fetch("/api/quotes/" + id, {
           method: "PUT", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: act })
         });
       }
-      await loadQuotes(); renderPreview();
+      await loadQuotes();
+      if (act === "del" && state.detailId === id) { state.detailId = null; showView("quotes"); }
+      else if (state.detailId) openDetail(state.detailId);
+      renderPreview();
     } catch (e) { alert("Couldn't reach the server."); }
+  }
+
+  /* ---------- quote detail (Jobber-style) ---------- */
+  function openDetail(id) {
+    var q = state.quotes.filter(function (x) { return x.id === id; })[0];
+    if (!q) { showView("quotes"); return; }
+    state.detailId = id;
+    var expired = Quotely.isQuoteExpired(q);
+    $("detailCust").textContent = q.customer || "Unnamed customer";
+    $("detailSub").textContent = q.number + "  ·  " + (q.trade || "") +
+      "  ·  Created " + new Date(q.createdAt || Date.now()).toLocaleDateString() +
+      "  ·  Valid until " + validUntilOf(q) +
+      (q.followUp ? "  ·  Follow up " + q.followUp : "");
+    $("detailBadges").innerHTML = badgeHTML(q.status, expired);
+    $("detailTotal").textContent = money(totalsOf(q));
+    $("detailDoc").innerHTML = sheetHTML(q);
+    renderDetailActions(q);
+    showView("detail");
+  }
+
+  function renderDetailActions(q) {
+    var host = $("detailActions");
+    var h = '<button class="btn-ghost btn-sm" data-dact="edit">Edit</button>';
+    if (q.status === "draft") {
+      h += '<button class="btn btn-sm" data-dact="sent">Mark sent</button>';
+      h += '<button class="btn-ghost btn-sm" data-dact="won">Won</button>';
+      h += '<button class="btn-ghost btn-sm" data-dact="lost">Lost</button>';
+    } else if (q.status === "sent") {
+      h += '<button class="btn btn-sm" data-dact="won">Mark won</button>';
+      h += '<button class="btn-ghost btn-sm" data-dact="lost">Mark lost</button>';
+    } else {
+      h += '<button class="btn-ghost btn-sm" data-dact="sent">Reopen</button>';
+    }
+    h += '<button class="btn-ghost btn-sm" data-dact="dup">Duplicate</button>';
+    h += '<button class="btn-ghost btn-sm" data-dact="print">Print / PDF</button>';
+    h += '<button class="btn-ghost btn-sm" data-dact="history">History</button>';
+    h += '<button class="btn-danger btn-sm" data-dact="del">Delete</button>';
+    host.innerHTML = h;
+    host.querySelectorAll("[data-dact]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var act = b.dataset.dact;
+        if (act === "edit") startEdit(q.id);
+        else if (act === "print") window.print();
+        else quoteAction(q.id, act);
+      });
+    });
   }
 
   /* ---------- quote version history ---------- */
@@ -682,7 +846,7 @@
           var total = v.totals && v.totals.total != null ? money(v.totals.total) : "—";
           return '<div class="hist-row"><div><strong>' + new Date(v.at).toLocaleString() + "</strong>" +
             '<div class="hint">' + n + " line item" + (n === 1 ? "" : "s") + " · total " + total + "</div></div>" +
-            '<button class="ghost small" data-restore="' + i + '">Restore this version</button></div>';
+            '<button class="btn-ghost btn-sm" data-restore="' + i + '">Restore this version</button></div>';
         }).join("")
       : '<p class="hint">No earlier versions — edits to the line items are snapshotted here automatically.</p>';
     $("historyModal").classList.remove("hidden");
@@ -697,6 +861,8 @@
           if (!r.ok) throw new Error("restore failed");
           $("historyModal").classList.add("hidden");
           await loadQuotes();
+          if (state.detailId) openDetail(state.detailId);
+          showToast("Version restored");
         } catch (e) { alert("Couldn't reach the server."); }
       });
     });
@@ -717,7 +883,7 @@
   function renderTemplateSel() {
     var sel = $("templateSel");
     var ts = state.templates || [];
-    sel.innerHTML = '<option value="">— Apply a saved template —</option>' + ts.map(function (t) {
+    sel.innerHTML = '<option value="">Apply a saved template…</option>' + ts.map(function (t) {
       return '<option value="' + t.id + '">' + esc(t.name) + " (" + t.items.length + " items · " + esc(t.trade) + ")</option>";
     }).join("");
   }
@@ -731,6 +897,7 @@
       return { description: i.description, qty: i.qty, unit: i.unit, unitPrice: i.unitPrice };
     });
     renderItems(); renderPreview();
+    showToast("Template applied");
   });
   $("saveTemplateBtn").addEventListener("click", async function () {
     if (!state.items.length) { alert("Add line items first, then save them as a template."); return; }
@@ -743,34 +910,79 @@
       });
       if (!r.ok) { var err = await r.json().catch(function () { return {}; }); throw new Error(err.error || "save failed"); }
       await loadTemplates();
-      alert("Template saved.");
+      showToast("Template saved");
     } catch (e) { alert("Couldn't save template: " + e.message); }
   });
 
-  /* ---------- customer directory ---------- */
-  async function renderCustomers() {
-    var body = $("customersBody");
+  /* ---------- customers ---------- */
+  async function loadCustomers() {
     try {
       var r = await fetch("/api/customers");
-      var cs = r.ok ? await r.json() : [];
-      body.innerHTML = cs.length ? "" : '<tr class="empty-row"><td colspan="7">No customers yet — save a quote with a customer name.</td></tr>';
-      cs.slice(0, 10).forEach(function (c) {
-        var tr = document.createElement("tr");
-        tr.innerHTML = '<td class="t-cust">' + esc(c.name) + "</td>" +
-          "<td>" + esc(c.phone || c.email || "—") + "</td>" +
-          '<td class="num">' + c.quotes + '</td><td class="num">' + c.won + "</td>" +
-          '<td class="num">' + money(c.totalQuoted) + '</td><td class="num">' + money(c.totalWon) + "</td>" +
-          "<td>" + esc((c.lastQuoteAt || "").slice(0, 10)) + "</td>";
-        body.appendChild(tr);
-      });
-    } catch (e) {
-      body.innerHTML = '<tr class="empty-row"><td colspan="7">Could not load customers.</td></tr>';
-    }
+      state.customers = r.ok ? await r.json() : [];
+    } catch (e) { state.customers = []; }
   }
 
-  document.querySelectorAll("#statusPills .fpill").forEach(function (p) {
+  function customerRowHTML(c) {
+    return '<td class="t-cust">' + esc(c.name) + "</td>" +
+      "<td>" + esc(c.phone || c.email || "—") + "</td>" +
+      '<td class="num">' + c.quotes + '</td><td class="num">' + c.won + "</td>" +
+      '<td class="num">' + money(c.totalQuoted) + '</td><td class="num">' + money(c.totalWon) + "</td>" +
+      "<td>" + esc((c.lastQuoteAt || "").slice(0, 10)) + "</td>";
+  }
+
+  async function renderTopCustomers() {
+    await loadCustomers();
+    var body = $("customersBody");
+    if (!state.customers.length) {
+      body.innerHTML = '<tr><td colspan="7"><div class="empty-state"><strong>No customers yet</strong><p>Save a quote with a customer name and they will appear here.</p></div></td></tr>';
+      return;
+    }
+    body.innerHTML = "";
+    state.customers.slice(0, 10).forEach(function (c) {
+      var tr = document.createElement("tr");
+      tr.innerHTML = customerRowHTML(c);
+      body.appendChild(tr);
+    });
+  }
+
+  function renderCustomersView() {
+    var q = state.custFilter.toLowerCase();
+    var list = state.customers.filter(function (c) {
+      if (!q) return true;
+      return (c.name + " " + (c.phone || "") + " " + (c.email || "")).toLowerCase().indexOf(q) !== -1;
+    });
+    $("custSub").textContent = state.customers.length
+      ? state.customers.length + " customers · lifetime value from saved quotes."
+      : "Lifetime value from saved quotes.";
+    var body = $("customersViewBody");
+    body.innerHTML = "";
+    if (!list.length) {
+      body.innerHTML = '<tr><td colspan="7"><div class="empty-state"><strong>No customers found</strong><p>Try a different search.</p></div></td></tr>';
+      return;
+    }
+    list.forEach(function (c) {
+      var tr = document.createElement("tr");
+      tr.className = "rowlink";
+      tr.title = "View this customer's quotes";
+      tr.innerHTML = customerRowHTML(c);
+      tr.addEventListener("click", function () {
+        state.quoteFilter = "";
+        document.querySelectorAll("#statusPills .tab").forEach(function (x) { x.classList.toggle("active", x.dataset.status === ""); });
+        $("searchBox").value = c.name;
+        renderQuotesList();
+        showView("quotes");
+      });
+      body.appendChild(tr);
+    });
+  }
+  $("custSearch").addEventListener("input", function () {
+    state.custFilter = $("custSearch").value;
+    renderCustomersView();
+  });
+
+  document.querySelectorAll("#statusPills .tab").forEach(function (p) {
     p.addEventListener("click", function () {
-      document.querySelectorAll("#statusPills .fpill").forEach(function (x) { x.classList.remove("active"); });
+      document.querySelectorAll("#statusPills .tab").forEach(function (x) { x.classList.remove("active"); });
       p.classList.add("active");
       state.quoteFilter = p.dataset.status;
       renderQuotesList();
@@ -785,7 +997,7 @@
     $("companyPhone").value = s.companyPhone || "";
     $("companyEmail").value = s.companyEmail || "";
     $("companyAddress").value = s.companyAddress || "";
-    $("logoPreview").innerHTML = s.logo ? '<img src="' + s.logo + '" alt="logo">' : "";
+    $("logoPreview").innerHTML = s.logo ? '<img src="' + s.logo + '" alt="company logo">' : "";
   }
   $("companyLogo").addEventListener("change", function (e) {
     var f = e.target.files[0];
@@ -793,7 +1005,7 @@
     var rd = new FileReader();
     rd.onload = function () {
       state.settings.logo = rd.result;
-      $("logoPreview").innerHTML = '<img src="' + rd.result + '" alt="logo">';
+      $("logoPreview").innerHTML = '<img src="' + rd.result + '" alt="company logo">';
     };
     rd.readAsDataURL(f);
   });
@@ -803,7 +1015,7 @@
     state.settings.companyEmail = $("companyEmail").value;
     state.settings.companyAddress = $("companyAddress").value;
     saveSettings();
-    $("settingsMsg").textContent = "Saved ✓ — your company info now appears on quotes.";
+    $("settingsMsg").textContent = "Saved — your company info now appears on quotes.";
     renderPreview();
   });
 

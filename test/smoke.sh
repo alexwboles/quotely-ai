@@ -74,7 +74,7 @@ echo "$D" | grep -q '"ok":true' && ! echo "$L2" | grep -q "$QID" \
 
 # 12. static serving + print CSS
 T=$(curl -s "$BASE/")
-echo "$T" | grep -q '<title>Quotely AI' && ok "GET / serves index.html" || bad "index not served"
+echo "$T" | grep -q '<title>Quotely' && ok "GET / serves index.html" || bad "index not served"
 curl -s "$BASE/style.css" | grep -q '@media print' && ok "print CSS present" || bad "no @media print"
 
 # 13. photos: save quote with photo (caption + tag kept, invalid rejected)
@@ -212,7 +212,7 @@ for n in payTerms warranty; do
   grep -q "$n" "$DIR/public/app.js" || missing2="$missing2 js:$n"
 done
 grep -q 'data-act="dup"' "$DIR/public/app.js" || missing2="$missing2 dup-button"
-grep -q 'status expired' "$DIR/public/app.js" || missing2="$missing2 expired-badge"
+grep -q 'badge expired' "$DIR/public/app.js" || missing2="$missing2 expired-badge"
 grep -q 'data-status="expired"' "$DIR/public/index.html" || missing2="$missing2 expired-filter"
 [ -z "$missing2" ] && ok "UI wires terms/warranty/duplicate/expiry" || bad "missing wiring:$missing2"
 

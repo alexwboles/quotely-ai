@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Quotely AI — Quotes that win work</title>
+<title>Quotely — Quotes that win work</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -12,35 +12,49 @@
 <body>
 <div class="app">
   <aside class="sidebar no-print">
-    <div class="brand"><span class="brand-mark">Q</span><span>Quotely <em>AI</em></span></div>
-    <nav class="nav">
-      <button class="nav-item active" data-view="dashboard"><span class="nav-dot"></span>Overview</button>
-      <button class="nav-item" data-view="new"><span class="nav-dot"></span>New quote</button>
-      <button class="nav-item" data-view="quotes"><span class="nav-dot"></span>Quotes <span id="quoteCount" class="nav-count"></span></button>
-      <button class="nav-item" data-view="settings"><span class="nav-dot"></span>Settings</button>
+    <div class="brand">
+      <span class="brand-mark">Q</span>
+      <span><span class="brand-name">Quotely</span><br><span class="brand-sub">Quote builder</span></span>
+    </div>
+    <nav class="nav" aria-label="Primary">
+      <button class="nav-item active" data-view="dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        Dashboard</button>
+      <button class="nav-item" data-view="new">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6M9 15h6"/></svg>
+        New quote</button>
+      <button class="nav-item" data-view="quotes">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg>
+        Quotes <span id="quoteCount" class="nav-count"></span></button>
+      <button class="nav-item" data-view="customers">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.4 3.4-5 6.5-5s5.7 1.6 6.5 5"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16 15.2c2.6.3 4.6 1.8 5.5 4.8"/></svg>
+        Customers</button>
+      <button class="nav-item" data-view="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.9 2.9l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.9-2.9l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.9-2.9l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.9 2.9l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        Settings</button>
     </nav>
-    <div class="side-foot">Free &amp; open.<br>Your data stays on your machine.</div>
+    <div class="side-foot">Free &amp; open source.<br>Your data stays on your machine.</div>
   </aside>
 
   <main>
-    <!-- ============ OVERVIEW ============ -->
+    <!-- ============ DASHBOARD ============ -->
     <section id="view-dashboard" class="view">
       <div class="page-head">
         <div>
-          <h1>Overview</h1>
+          <h1>Dashboard</h1>
           <p class="page-sub" id="dashDate"></p>
         </div>
-        <button class="primary" data-goto-new>＋ New quote</button>
+        <button class="btn" data-goto-new>+ New quote</button>
       </div>
-      <div class="kpis">
-        <div class="kpi"><div class="kpi-label">Pipeline value</div><div class="kpi-num" id="kpiPipeline">$0</div><div class="kpi-sub" id="kpiPipelineSub"></div></div>
-        <div class="kpi"><div class="kpi-label">Win rate</div><div class="kpi-num" id="kpiWinRate">—</div><div class="kpi-sub" id="kpiWinSub"></div></div>
-        <div class="kpi"><div class="kpi-label">Average quote</div><div class="kpi-num" id="kpiAvg">$0</div><div class="kpi-sub" id="kpiAvgSub"></div></div>
-        <div class="kpi"><div class="kpi-label">Follow-ups due</div><div class="kpi-num" id="kpiFollow">0</div><div class="kpi-sub" id="kpiFollowSub"></div></div>
+      <div class="stat-strip">
+        <div class="stat"><div class="stat-label">Pipeline value</div><div class="stat-num" id="kpiPipeline">$0.00</div><div class="stat-sub" id="kpiPipelineSub"></div></div>
+        <div class="stat"><div class="stat-label">Win rate</div><div class="stat-num" id="kpiWinRate">—</div><div class="stat-sub" id="kpiWinSub"></div></div>
+        <div class="stat"><div class="stat-label">Average quote</div><div class="stat-num" id="kpiAvg">$0.00</div><div class="stat-sub" id="kpiAvgSub"></div></div>
+        <div class="stat"><div class="stat-label">Follow-ups due</div><div class="stat-num" id="kpiFollow">0</div><div class="stat-sub" id="kpiFollowSub"></div></div>
       </div>
       <div class="panel">
         <div class="panel-head"><h3>Pipeline</h3><button class="linklike" data-goto-quotes>View all quotes</button></div>
-        <div class="pipe-grid" id="pipeGrid"></div>
+        <div class="pipe-strip" id="pipeGrid"></div>
       </div>
       <div class="cols-2">
         <div class="panel">
@@ -53,23 +67,23 @@
         </div>
       </div>
       <div class="panel">
-        <div class="panel-head"><h3>Top customers</h3><span class="hint">lifetime value from saved quotes</span></div>
+        <div class="panel-head"><h3>Top customers</h3><button class="linklike" data-goto-customers>Customer directory</button></div>
         <div class="table-wrap"><table class="tbl"><thead><tr>
           <th>Customer</th><th>Contact</th><th class="num">Quotes</th><th class="num">Won</th><th class="num">Quoted</th><th class="num">Won value</th><th>Last quote</th>
         </tr></thead><tbody id="customersBody"></tbody></table></div>
       </div>
     </section>
 
-    <!-- ============ NEW QUOTE ============ -->
+    <!-- ============ NEW / EDIT QUOTE ============ -->
     <section id="view-new" class="view hidden">
       <div class="page-head">
         <div>
-          <h1>New quote</h1>
+          <h1 id="newTitle">New quote</h1>
           <p class="page-sub">Describe the job — Quotely drafts the line items and lays out the sheet.</p>
         </div>
         <div class="head-actions">
-          <button id="printBtn" class="ghost">Print / PDF</button>
-          <button id="saveBtn" class="primary">Save quote</button>
+          <button id="printBtn" class="btn-ghost">Print / PDF</button>
+          <button id="saveBtn" class="btn">Save quote</button>
         </div>
       </div>
       <div class="editor">
@@ -79,27 +93,25 @@
             <div class="field"><label for="trade">Trade</label><select id="trade"></select></div>
             <div class="field"><label for="description">Job description</label>
               <textarea id="description" rows="3" placeholder="e.g. Replace 2 kitchen faucets and fix a leaking bathroom pipe"></textarea></div>
-            <button id="generateBtn" class="primary full">Generate line items</button>
+            <button id="generateBtn" class="btn btn-block">Generate line items</button>
             <p class="hint" id="genSource"></p>
           </div>
 
           <div class="panel">
-            <div class="panel-head"><h3>Job photos <span class="photos-count" id="photoCount"></span></h3></div>
-            <div class="phototray">
-              <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Add job photos">
-                <span class="dz-icon">+</span>
-                <span>Drop site photos here or <u>browse</u> — they develop below, then print on the quote sheet</span>
-                <input type="file" id="photoInput" accept="image/*" multiple hidden>
-              </div>
-              <div class="photo-grid" id="photoGrid"></div>
+            <div class="panel-head"><h3>Job photos <span class="hint" id="photoCount" style="margin:0"></span></h3><span class="hint" style="margin:0">Up to 8 — they print on the quote</span></div>
+            <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Add job photos">
+              <span class="dz-plus">+</span>
+              <span>Drop site photos here or <u>browse</u> your files</span>
+              <input type="file" id="photoInput" accept="image/*" multiple hidden>
             </div>
-            <p class="hint">Every photo is time-stamped and analyzed on your machine — size, dominant colors, dark/blurry warnings. With your OpenAI key set, AI look can describe a photo and suggest line items.</p>
+            <div class="photo-grid" id="photoGrid"></div>
+            <p class="hint">Every photo is time-stamped and analyzed on your machine — size, dark/blurry warnings. With your OpenAI key set, AI look can describe a photo and suggest line items.</p>
           </div>
 
           <div class="panel">
             <div class="panel-head"><h3>Customer</h3></div>
             <div class="grid-2">
-              <div class="field"><label for="customer">Customer name</label><input id="customer" placeholder="Jane Smith"></div>
+              <div class="field"><label for="customer">Customer name</label><input id="customer" placeholder="Jane Smith" autocomplete="off"></div>
               <div class="field"><label for="phone">Phone</label><input id="phone" placeholder="(555) 123-4567"></div>
             </div>
             <div class="field"><label for="email">Email</label><input id="email" type="email" placeholder="jane@example.com"></div>
@@ -110,19 +122,19 @@
           </div>
 
           <div class="panel">
-            <div class="panel-head"><h3>Line items</h3><button id="addLineBtn" class="ghost small">+ Add line</button></div>
+            <div class="panel-head"><h3>Line items</h3><button id="addLineBtn" class="btn-ghost btn-sm">+ Add line</button></div>
             <div class="template-bar">
               <select id="templateSel" aria-label="Apply a saved line-item template"></select>
-              <button id="applyTemplateBtn" class="ghost small">Apply template</button>
-              <button id="saveTemplateBtn" class="ghost small">Save as template</button>
+              <button id="applyTemplateBtn" class="btn-ghost btn-sm">Apply</button>
+              <button id="saveTemplateBtn" class="btn-ghost btn-sm">Save as template</button>
             </div>
             <div class="table-wrap">
-              <table class="tbl editable" id="itemsTable">
-                <thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th>Unit $</th><th class="num">Total</th><th></th></tr></thead>
+              <table class="tbl" id="itemsTable">
+                <thead><tr><th>Description</th><th style="width:70px">Qty</th><th style="width:90px">Unit</th><th style="width:110px">Unit price</th><th class="num" style="width:110px">Total</th><th style="width:44px"></th></tr></thead>
                 <tbody id="itemsBody"></tbody>
               </table>
             </div>
-            <div class="grid-2">
+            <div class="grid-2" style="margin-top:12px">
               <div class="field"><label for="taxRate">Tax %</label><input id="taxRate" type="number" value="0" min="0" step="0.1"></div>
               <div class="field"><label for="depositRate">Deposit %</label><input id="depositRate" type="number" value="25" min="0" max="100"></div>
             </div>
@@ -137,18 +149,18 @@
               <div class="field"><label for="warranty">Warranty</label><input id="warranty" placeholder="e.g. 1-year workmanship warranty"></div>
             </div>
             <div class="field"><label for="notes">Notes for customer</label>
-              <textarea id="notes" rows="2" placeholder="e.g. 1-year workmanship warranty included"></textarea></div>
+              <textarea id="notes" rows="2" placeholder="Anything the customer should know"></textarea></div>
             <div class="row-end">
-              <button id="clearBtn" class="danger-ghost small">Clear</button>
+              <button id="clearBtn" class="btn-danger btn-sm">Clear form</button>
             </div>
             <p class="hint" id="saveMsg"></p>
           </div>
         </div>
 
         <div class="preview-col">
-          <div class="panel sheet-panel">
-            <div class="panel-head"><h3>Quote sheet</h3><span class="hint">Live preview</span></div>
-            <div id="preview" class="sheet"><!-- rendered by app.js --></div>
+          <div class="panel">
+            <div class="panel-head"><h3>Quote preview</h3><span class="hint" style="margin:0">Live</span></div>
+            <div id="preview" class="doc"><!-- rendered by app.js --></div>
           </div>
         </div>
       </div>
@@ -161,27 +173,66 @@
           <h1>Quotes</h1>
           <p class="page-sub" id="quotesSub"></p>
         </div>
-        <button class="primary" data-goto-new>＋ New quote</button>
+        <button class="btn" data-goto-new>+ New quote</button>
       </div>
       <div id="followUpAlert" class="no-print"></div>
       <div class="panel">
         <div class="quotes-toolbar">
-          <div class="fpills" id="statusPills">
-            <button class="fpill active" data-status="">All</button>
-            <button class="fpill" data-status="draft">Draft</button>
-            <button class="fpill" data-status="sent">Sent</button>
-            <button class="fpill" data-status="won">Won</button>
-            <button class="fpill" data-status="lost">Lost</button>
-            <button class="fpill" data-status="expired">Expired</button>
+          <div class="tabs" id="statusPills" role="tablist">
+            <button class="tab active" data-status="">All</button>
+            <button class="tab" data-status="draft">Draft</button>
+            <button class="tab" data-status="sent">Sent</button>
+            <button class="tab" data-status="won">Won</button>
+            <button class="tab" data-status="lost">Lost</button>
+            <button class="tab" data-status="expired">Expired</button>
           </div>
           <input id="searchBox" class="search" placeholder="Search customer or quote #">
         </div>
+        <div class="list-summary"><span id="listCount"></span><span>Total outstanding: <strong id="listOutstanding">$0.00</strong></span></div>
         <div class="table-wrap">
           <table class="tbl">
-            <thead><tr><th>Quote</th><th>Customer</th><th>Trade</th><th class="num">Total</th><th>Status</th><th>Follow-up</th><th class="num">Actions</th></tr></thead>
+            <thead><tr><th>Quote</th><th>Customer</th><th>Trade</th><th class="num">Total</th><th>Status</th><th>Follow-up</th><th></th></tr></thead>
             <tbody id="quotesList"></tbody>
           </table>
         </div>
+      </div>
+    </section>
+
+    <!-- ============ QUOTE DETAIL ============ -->
+    <section id="view-detail" class="view hidden">
+      <div class="crumb-row no-print">
+        <button class="crumb" data-goto-quotes>&larr; Back to quotes</button>
+        <div class="detail-actions" id="detailActions"></div>
+      </div>
+      <div class="detail-head">
+        <div>
+          <h2 class="detail-cust" id="detailCust"></h2>
+          <div class="detail-sub" id="detailSub"></div>
+          <div class="detail-badges" id="detailBadges"></div>
+        </div>
+        <div class="detail-side">
+          <div class="detail-total-label">Quote total</div>
+          <div class="detail-total" id="detailTotal"></div>
+        </div>
+      </div>
+      <div class="detail-doc">
+        <div id="detailDoc" class="doc"></div>
+      </div>
+    </section>
+
+    <!-- ============ CUSTOMERS ============ -->
+    <section id="view-customers" class="view hidden">
+      <div class="page-head">
+        <div>
+          <h1>Customers</h1>
+          <p class="page-sub" id="custSub">Lifetime value from saved quotes.</p>
+        </div>
+        <input id="custSearch" class="search" placeholder="Search customers">
+      </div>
+      <div class="panel">
+        <div class="table-wrap"><table class="tbl"><thead><tr>
+          <th>Customer</th><th>Contact</th><th class="num">Quotes</th><th class="num">Won</th><th class="num">Quoted</th><th class="num">Won value</th><th>Last quote</th>
+        </tr></thead><tbody id="customersViewBody"></tbody></table></div>
       </div>
     </section>
 
@@ -202,7 +253,7 @@
         <div class="field"><label for="companyAddress">Address</label><input id="companyAddress"></div>
         <div class="field"><label for="companyLogo">Logo (optional)</label><input id="companyLogo" type="file" accept="image/*"></div>
         <div id="logoPreview"></div>
-        <button id="saveSettingsBtn" class="primary">Save settings</button>
+        <button id="saveSettingsBtn" class="btn">Save settings</button>
         <p class="hint" id="settingsMsg"></p>
       </div>
     </section>
@@ -211,10 +262,12 @@
 
 <div id="historyModal" class="modal hidden" role="dialog" aria-label="Quote version history">
   <div class="modal-card">
-    <div class="modal-head"><h3 id="historyTitle">Version history</h3><button id="historyClose" class="ghost small">Close</button></div>
+    <div class="modal-head"><h3 id="historyTitle">Version history</h3><button id="historyClose" class="btn-ghost btn-sm">Close</button></div>
     <div id="historyBody"></div>
   </div>
 </div>
+
+<div id="toastHost"></div>
 
 <script src="generate.js"></script>
 <script src="app.js"></script>
