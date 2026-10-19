@@ -1,39 +1,119 @@
-# Quotely AI — Redesign Audit (pilot for portfolio de-vibe-code)
+# Quotely AI — Redesign Audit (v2 pass, 2026-10-19)
 
-Date: 2026-10-13. References: Jobber (quote detail screenshot), Joist (invoice/estimate list + mobile estimate screenshots).
+Previous pass: 2026-10-13 pilot (Jobber/Joist study) shipped "the contractor's office":
+dark-slate sidebar, money-green accent, document-first quote detail, customer
+directory, edit flow. This pass studies the bigger trades-CRM platforms and
+closes the functional gaps that keep Quotely from feeling like shippable
+estimating software, with a new distinctive visual identity.
 
-## Visual gaps (why it reads "vibe coded")
+## 1. Who was studied
 
-1. **Rounded everything.** `--radius: 14px` cards, 10px buttons/inputs, 999px pill status badges, pill nav dots, rounded modal leftovers. Alex's no-rounded-edges rule is violated throughout. Jobber/Joist use flat, square geometry.
-2. **Decorative nav dots instead of icons.** The sidebar uses 7px dots — a template tell. Real tools use real icons.
-3. **Fullwidth "＋" glyph** in the New quote button — emoji-adjacent chrome.
-4. **"AI" pill badge in the brand lockup** — gimmicky; competitors brand the company, not the tech.
-5. **Darkroom "developing tray" photo metaphor.** Film-strip dot borders, rotated polaroid cards, tape strips, sepia "develop" animation, "FRAME 01" placeholders. No real quoting software does this. Joist uses a clean attachment grid. This is the single most vibe-coded element in the app.
-6. **Copper/cream "contractor's desk" theme.** Reads crafty, not commercial. Jobber and Joist both use neutral white surfaces + green money accent.
-7. **Generic KPI card dashboard.** Four rounded stat cards with no hierarchy or action orientation — the canonical vibe-coded dashboard.
-8. **Bare-text empty states** ("No quotes yet.") — not designed; competitors use helpful copy + a next action.
-9. **Inconsistent status language.** Status "pills" are 999px rounded (vibe-coded); Vilano CRM already established sharp-edged badges as the house pattern.
-10. **Quote sheet preview is good** (document-style, letterhead, signature line) but wrapped in rounded chrome; the document itself is the right metaphor and should be promoted, not framed.
+- **JobNimbus** — Estimate Builder support doc (support.jobnimbus.com "How Do I
+  Create a Legacy Estimate?"), sales page (jobnimbus.com/sales), 2026 estimating
+  guide. Core patterns: builder with line-item sections, Products & Services
+  catalog feeding line items, per-line hover actions (delete / add image), design
+  templates + saved estimates, customer note vs internal note, kanban "Boards"
+  with estimated totals per column, sales automation (proposal signed → job
+  moves to Sold).
+- **AccuLynx** — "Ultimate Guide to Roof Estimates" (acculynx.com), IronPros
+  feature overview, softwarefinder.com workflow walkthrough, Leap-vs-AccuLynx
+  comparison. Core patterns: estimate lives inside a *digital job file*
+  (photos, notes, documents, measurements all attached to the job);
+  measurement/catalog data auto-populates the estimate; adjust line items,
+  labor, profit margin, waste factors; "save, then choose from several delivery
+  options" to get the estimate to the customer; customer portal for approvals.
+- **JobProgress** (appvizer.com, saasbrowser.com) — template-driven quotes with
+  consistent line-item structure across repeat jobs; drag-and-drop estimate
+  setup; integrated product catalog for accurate pricing; automated invoicing.
+- **Adjacent patterns from research** — JobProof.ca (customer-approved change
+  orders, one organized job history); iTrade (quote expiries with
+  notifications, customer-selectable optional extras for upselling, margin
+  overrides, revise-and-update instantly).
 
-## Functional gaps (vs Jobber / Joist)
+## 2. Layout / IA / visual patterns worth borrowing (concrete)
 
-1. **No quote detail view.** Jobber's core pattern is list → document detail with an action bar (Edit, Duplicate, Mark sent/won, Print/PDF, History). Quotely only has row action buttons.
-2. **No edit flow.** The API supports full PUT updates (items, photos, terms) with version snapshots, but the UI exposes no way to revise a saved quote — a Jobber-basic capability.
-3. **Customer directory buried.** A top-10 table on the dashboard; Jobber/Joist give Clients a dedicated nav view with search.
-4. **Row-action button pile.** Up to 7 small buttons per row (Mark sent, Won, Lost, Reopen, Duplicate, Delete, History). Competitors use Open → detail actions.
-5. **Photo management is whimsy over function.** Tags/captions/AI analysis exist but are presented as darkroom props.
-6. **Save is a dead end.** After saving, the builder just sits there. Jobber shows "Quote created" and lands on the detail document.
+1. **JobNimbus "Boards"** — pipeline as clickable columns (Draft / Sent / Won /
+   Lost) with estimated totals per column instead of a thin stat strip. Maps
+   directly onto Quotely's pipeline strip; make it a real board with quote cards.
+2. **AccuLynx digital job file** — the quote detail becomes a *job file*:
+   the estimate document on the left, a right rail holding status actions,
+   customer card, internal notes, milestones summary, and next pipeline steps.
+   Everything about the job in one place (this is where SignPilot + change
+   orders + milestones currently dangle in a panel below the document).
+3. **JobNimbus Products & Services picker** — quotely owns a canonical 71-item
+   price bank, but the builder never touches it. Add an "Add from price bank"
+   modal: trade filter + search → insert at bank prices.
+4. **AccuLynx delivery options** — after save, competitors offer send via
+   email/text. Add a Send dialog: pre-composed subject/body (company, quote
+   number, total, expiry) → opens the mail app, plus a one-click "Mark sent".
+5. **JobNimbus customer note vs internal note** — one `notes` field mixes
+   customer-facing copy with private margin/strategy scribbles. Split:
+   "Notes for customer" (prints) + "Internal note" (never prints, rail only).
+6. **iTrade customer-selectable extras** — optional line items: a per-row
+   "Optional" toggle; optional lines excluded from totals, shown in a separate
+   "Optional add-ons" block with a "Total with all options" figure. The classic
+   upsell pattern, missing from Quotely.
 
-## Flow gaps
+## 3. Functional gaps closed in this pass (2–4)
 
-1. No breadcrumb/back pattern on sub-views (Jobber: "Back to: Quotes").
-2. No "quote created" confirmation → detail landing.
-3. Template apply/save lives in a cramped bar above the items table; competitors treat templates as a first-class picker.
+1. **No send/delivery flow.** Competitors all close the loop with delivery
+   options; Quotely could only Print/PDF. → *Send quote* dialog on the detail
+   view (mailto composer + mark-sent), closing the JobNimbus/AccuLynx gap.
+2. **No optional/upsell line items.** → per-line "Optional" toggle; excluded
+   from totals (`optionsTotal`); "Optional add-ons" block on the document;
+   server `cleanItems` keeps `optional`; survives import/duplicate/edit/history.
+3. **Price bank invisible in the builder.** quotely owns the canonical bank
+   (71 items, 10 trades) consumed by sitevisit-ai, but the builder UI never
+   used it. → *Add from price bank* modal with trade filter + search.
+4. **No internal note.** → `internalNotes` field: editable in the builder,
+   shown in the job-file rail on detail, never in the printed document. Server
+   PUT allow-list + `buildQuote` extended; contract shape unchanged otherwise.
 
-## What the redesign keeps (all features preserved)
+Not closed (conscious scope): per-line photos (JobNimbus hover pattern —
+photos stay at quote level, clean and proven); per-line margin override
+(iTrade — deposit/discount cover the basics); customer portal (hosted URL =
+ongoing cost; mailto keeps it free).
 
-AI line-item generation, local estimator fallback, line-item templates (save/apply), payment terms + warranty per quote, expiry detection + badges, quote duplication, version history + restore, job photos (on-device analysis, captions, before/after tags, AI look), follow-up dates + alerts, pipeline view, customer directory data, company settings + logo, print/PDF, tax/deposit/valid-days/notes.
+## 4. The new visual identity — "The Estimate Ledger"
 
-## Design concept (pilot)
+The 2026-10-13 pilot gave Quotely "the contractor's office" (money green,
+Jobber/Joist voice). This pass gives it its own trades-estimating identity
+distinct from that pilot and from the competitor palettes (JobNimbus dark blue,
+AccuLynx blue, Joist/Jobber green):
 
-"The contractor's office": a field-service quoting desk in the visual language of Jobber and Joist. Crisp white document surfaces on a cool light-gray ground, hairline borders, sharp square corners everywhere, one confident money-green accent (#157a3e) for primary actions and won states, dark slate sidebar with real inline SVG icons. Inter with tight headings and tabular numerals on every dollar figure. IA follows Jobber: sidebar (Dashboard, New Quote, Quotes, Customers, Settings), Joist-style quotes list (search, status tabs, outstanding total, Open/Edit per row), Jobber-style quote detail document (letterhead, line items, totals block, terms, signature, action bar), two-pane builder with live document preview. Photos become clean Joist-style attachments. Status gets flat square badges: Draft gray, Sent blue, Won green, Lost slate, Expired red.
+- **A ledger, not a dashboard app.** Warm paper ground (#f3f1ea), white sheet
+  surfaces, hairline ledger rules, mono (`IBM Plex Mono`) for quote numbers and
+  reference labels, Inter Tight display headings, tabular numerals on every
+  dollar figure.
+- **Contractor-amber accent (#b45309)** — the field-mark orange of job-site
+  spray paint and survey flags, used for primary actions, the active-nav edge,
+  and step kickers. Status colors stay semantic (Won green, Sent blue, Draft
+  gray, Lost slate, Expired red). No green-as-brand this time.
+- **Sharp square geometry** everywhere (Alex's rule), no purple/blue gradients,
+  no emoji chrome; inline SVG icons only.
+- **Quote detail = job file.** Document sheet left; "JOB FILE" rail right with
+  status actions, customer card, internal note, milestones summary, timeline,
+  and the SignPilot/change-order pipeline as rail modules.
+- **Dashboard pipeline board** in the JobNimbus boards spirit: columns with
+  estimated totals, cards clickable into the job file.
+- **Builder as numbered steps** (01 The job · 02 Photos · 03 Customer · 04 Line
+  items) in the JobProgress template-driven spirit; live sheet preview stays.
+
+## 5. Preserved — everything from the pipeline consolidation (untouched contracts)
+
+- Price bank ownership: GET /api/price-bank → {version,currency,updated,
+  tripFee,trades[],items[]} (v1.0.0, 71 items, 10 trades), `servedBy` field.
+- POST /api/quotes/import upsert on importedFrom.visitId.
+- SignPilot two-way wiring (won → approval doc; sign/decline callback;
+  declined reopens to sent + reason; change-order/completion docs; sync re-poll;
+  SIGNPILOT_URL env).
+- Change orders (CO-1…; approve → revisedTotal), milestone billing
+  (Deposit 25 → Rough-in 50 → Final 25), materials-list export (JSON + CSV for
+  materiallist-ai), job-pipeline content on detail.
+- QUOTELY_URL / SIGNPILOT_URL env wiring. AI generate (OpenAI optional),
+  local estimator fallback, templates, version history + restore, payment terms
+  + warranty, expiry, duplication, follow-ups, customer directory, settings.
+
+Additive API changes only: items may carry `optional: true`; quote.totals gains
+`optionsTotal` (sum of optional lines); quote gains `internalNotes` string.
+All existing fields, IDs, and data flows keep working.

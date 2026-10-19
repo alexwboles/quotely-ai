@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Quotely — Quotes that win work</title>
+<title>Quotely — The estimating desk for trades</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,7 +14,7 @@
   <aside class="sidebar no-print">
     <div class="brand">
       <span class="brand-mark">Q</span>
-      <span><span class="brand-name">Quotely</span><br><span class="brand-sub">Quote builder</span></span>
+      <span><span class="brand-name">Quotely</span><br><span class="brand-sub">Estimating desk</span></span>
     </div>
     <nav class="nav" aria-label="Primary">
       <button class="nav-item active" data-view="dashboard">
@@ -41,6 +41,7 @@
     <section id="view-dashboard" class="view">
       <div class="page-head">
         <div>
+          <div class="kicker">Estimate ledger</div>
           <h1>Dashboard</h1>
           <p class="page-sub" id="dashDate"></p>
         </div>
@@ -52,9 +53,9 @@
         <div class="stat"><div class="stat-label">Average quote</div><div class="stat-num" id="kpiAvg">$0.00</div><div class="stat-sub" id="kpiAvgSub"></div></div>
         <div class="stat"><div class="stat-label">Follow-ups due</div><div class="stat-num" id="kpiFollow">0</div><div class="stat-sub" id="kpiFollowSub"></div></div>
       </div>
-      <div class="panel">
-        <div class="panel-head"><h3>Pipeline</h3><button class="linklike" data-goto-quotes>View all quotes</button></div>
-        <div class="pipe-strip" id="pipeGrid"></div>
+      <div class="panel board-panel">
+        <div class="panel-head"><h3>Pipeline board</h3><button class="linklike" data-goto-quotes>View all quotes</button></div>
+        <div class="board" id="boardGrid"></div>
       </div>
       <div class="cols-2">
         <div class="panel">
@@ -78,6 +79,7 @@
     <section id="view-new" class="view hidden">
       <div class="page-head">
         <div>
+          <div class="kicker">Quote builder</div>
           <h1 id="newTitle">New quote</h1>
           <p class="page-sub">Describe the job — Quotely drafts the line items and lays out the sheet.</p>
         </div>
@@ -89,7 +91,7 @@
       <div class="editor">
         <div class="form-col">
           <div class="panel">
-            <div class="panel-head"><h3>The job</h3></div>
+            <div class="panel-head"><h3><span class="step-num">01</span>The job</h3></div>
             <div class="field"><label for="trade">Trade</label><select id="trade"></select></div>
             <div class="field"><label for="description">Job description</label>
               <textarea id="description" rows="3" placeholder="e.g. Replace 2 kitchen faucets and fix a leaking bathroom pipe"></textarea></div>
@@ -98,7 +100,7 @@
           </div>
 
           <div class="panel">
-            <div class="panel-head"><h3>Job photos <span class="hint" id="photoCount" style="margin:0"></span></h3><span class="hint" style="margin:0">Up to 8 — they print on the quote</span></div>
+            <div class="panel-head"><h3><span class="step-num">02</span>Job photos <span class="hint" id="photoCount" style="margin:0"></span></h3><span class="hint" style="margin:0">Up to 8 — they print on the quote</span></div>
             <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Add job photos">
               <span class="dz-plus">+</span>
               <span>Drop site photos here or <u>browse</u> your files</span>
@@ -109,7 +111,7 @@
           </div>
 
           <div class="panel">
-            <div class="panel-head"><h3>Customer</h3></div>
+            <div class="panel-head"><h3><span class="step-num">03</span>Customer</h3></div>
             <div class="grid-2">
               <div class="field"><label for="customer">Customer name</label><input id="customer" placeholder="Jane Smith" autocomplete="off"></div>
               <div class="field"><label for="phone">Phone</label><input id="phone" placeholder="(555) 123-4567"></div>
@@ -122,7 +124,12 @@
           </div>
 
           <div class="panel">
-            <div class="panel-head"><h3>Line items</h3><button id="addLineBtn" class="btn-ghost btn-sm">+ Add line</button></div>
+            <div class="panel-head"><h3><span class="step-num">04</span>Line items</h3>
+              <div class="head-actions">
+                <button id="bankBtn" class="btn-ghost btn-sm">From price bank</button>
+                <button id="addLineBtn" class="btn-ghost btn-sm">+ Add line</button>
+              </div>
+            </div>
             <div class="template-bar">
               <select id="templateSel" aria-label="Apply a saved line-item template"></select>
               <button id="applyTemplateBtn" class="btn-ghost btn-sm">Apply</button>
@@ -130,10 +137,11 @@
             </div>
             <div class="table-wrap">
               <table class="tbl" id="itemsTable">
-                <thead><tr><th>Description</th><th style="width:70px">Qty</th><th style="width:90px">Unit</th><th style="width:110px">Unit price</th><th class="num" style="width:110px">Total</th><th style="width:44px"></th></tr></thead>
+                <thead><tr><th>Description</th><th style="width:64px">Qty</th><th style="width:84px">Unit</th><th style="width:104px">Unit price</th><th style="width:58px" title="Optional add-on: excluded from the quote total">Opt</th><th class="num" style="width:96px">Total</th><th style="width:40px"></th></tr></thead>
                 <tbody id="itemsBody"></tbody>
               </table>
             </div>
+            <p class="hint">Tick <strong>Opt</strong> for optional add-ons — they print in their own section and stay out of the quote total until the customer picks them.</p>
             <div class="grid-3" style="margin-top:12px">
               <div class="field"><label for="taxRate">Tax %</label><input id="taxRate" type="number" value="0" min="0" step="0.1"></div>
               <div class="field"><label for="discountRate">Discount %</label><input id="discountRate" type="number" value="0" min="0" max="100" step="0.1"></div>
@@ -149,8 +157,10 @@
                 </select></div>
               <div class="field"><label for="warranty">Warranty</label><input id="warranty" placeholder="e.g. 1-year workmanship warranty"></div>
             </div>
-            <div class="field"><label for="notes">Notes for customer</label>
+            <div class="field"><label for="notes">Notes for customer <span class="hint-inline">(prints on the quote)</span></label>
               <textarea id="notes" rows="2" placeholder="Anything the customer should know"></textarea></div>
+            <div class="field"><label for="internalNotes">Internal note <span class="hint-inline">(private — never prints)</span></label>
+              <textarea id="internalNotes" rows="2" placeholder="Margin targets, strategy, things only your crew sees"></textarea></div>
             <div class="row-end">
               <button id="clearBtn" class="btn-danger btn-sm">Clear form</button>
             </div>
@@ -160,7 +170,7 @@
 
         <div class="preview-col">
           <div class="panel">
-            <div class="panel-head"><h3>Quote preview</h3><span class="hint" style="margin:0">Live</span></div>
+            <div class="panel-head"><h3>Live sheet</h3><span class="hint" style="margin:0">Updates as you type</span></div>
             <div id="preview" class="doc"><!-- rendered by app.js --></div>
           </div>
         </div>
@@ -171,6 +181,7 @@
     <section id="view-quotes" class="view hidden">
       <div class="page-head">
         <div>
+          <div class="kicker">Estimate ledger</div>
           <h1>Quotes</h1>
           <p class="page-sub" id="quotesSub"></p>
         </div>
@@ -199,29 +210,54 @@
       </div>
     </section>
 
-    <!-- ============ QUOTE DETAIL ============ -->
+    <!-- ============ QUOTE DETAIL (job file) ============ -->
     <section id="view-detail" class="view hidden">
       <div class="crumb-row no-print">
         <button class="crumb" data-goto-quotes>&larr; Back to quotes</button>
-        <div class="detail-actions" id="detailActions"></div>
+        <div class="mono stamp" id="detailStamp"></div>
       </div>
-      <div class="detail-head">
-        <div>
-          <h2 class="detail-cust" id="detailCust"></h2>
-          <div class="detail-sub" id="detailSub"></div>
-          <div class="detail-badges" id="detailBadges"></div>
+      <div class="jobfile">
+        <div class="jobfile-main">
+          <div class="detail-head">
+            <div>
+              <h2 class="detail-cust" id="detailCust"></h2>
+              <div class="detail-sub" id="detailSub"></div>
+              <div class="detail-badges" id="detailBadges"></div>
+            </div>
+            <div class="detail-side">
+              <div class="detail-total-label">Quote total</div>
+              <div class="detail-total" id="detailTotal"></div>
+              <div class="detail-total-sub" id="detailTotalSub"></div>
+            </div>
+          </div>
+          <div id="detailDoc" class="doc"></div>
         </div>
-        <div class="detail-side">
-          <div class="detail-total-label">Quote total</div>
-          <div class="detail-total" id="detailTotal"></div>
-        </div>
-      </div>
-      <div class="detail-doc">
-        <div id="detailDoc" class="doc"></div>
-      </div>
-      <div class="panel no-print" id="pipelinePanel">
-        <div class="panel-head"><h3>Job pipeline</h3><span class="hint" id="pipelineHint" style="margin:0"></span></div>
-        <div id="pipelineBody"></div>
+        <aside class="jobfile-rail no-print">
+          <div class="rail-mod">
+            <div class="rail-kicker">Actions</div>
+            <div class="detail-actions" id="detailActions"></div>
+          </div>
+          <div class="rail-mod">
+            <div class="rail-kicker">Customer</div>
+            <div id="railCustomer" class="rail-customer"></div>
+          </div>
+          <div class="rail-mod">
+            <div class="rail-kicker">Internal note</div>
+            <div id="railInternal"></div>
+          </div>
+          <div class="rail-mod">
+            <div class="rail-kicker">Billing</div>
+            <div id="railBilling"></div>
+          </div>
+          <div class="rail-mod rail-pipeline">
+            <div class="rail-kicker">Job pipeline <span class="hint" id="pipelineHint" style="margin:0"></span></div>
+            <div id="pipelineBody"></div>
+          </div>
+          <div class="rail-mod">
+            <div class="rail-kicker">History</div>
+            <div id="railHistory"></div>
+          </div>
+        </aside>
       </div>
     </section>
 
@@ -229,6 +265,7 @@
     <section id="view-customers" class="view hidden">
       <div class="page-head">
         <div>
+          <div class="kicker">Customer directory</div>
           <h1>Customers</h1>
           <p class="page-sub" id="custSub">Lifetime value from saved quotes.</p>
         </div>
@@ -245,6 +282,7 @@
     <section id="view-settings" class="view hidden">
       <div class="page-head">
         <div>
+          <div class="kicker">Company profile</div>
           <h1>Settings</h1>
           <p class="page-sub">Your company profile — shown on every quote. Saved in this browser.</p>
         </div>
@@ -269,6 +307,32 @@
   <div class="modal-card">
     <div class="modal-head"><h3 id="historyTitle">Version history</h3><button id="historyClose" class="btn-ghost btn-sm">Close</button></div>
     <div id="historyBody"></div>
+  </div>
+</div>
+
+<div id="bankModal" class="modal hidden" role="dialog" aria-label="Add from price bank">
+  <div class="modal-card wide">
+    <div class="modal-head"><h3>Add from price bank</h3><button id="bankClose" class="btn-ghost btn-sm">Close</button></div>
+    <div class="bank-tools">
+      <select id="bankTrade" aria-label="Filter by trade"></select>
+      <input id="bankSearch" placeholder="Search 71 priced items…" aria-label="Search the price bank">
+    </div>
+    <div id="bankList" class="bank-list"></div>
+    <p class="hint">Prices come from your canonical price bank (v1.0.0) — the same one SiteVisit pulls. Quantities land at 1; adjust after adding.</p>
+  </div>
+</div>
+
+<div id="sendModal" class="modal hidden" role="dialog" aria-label="Send quote">
+  <div class="modal-card">
+    <div class="modal-head"><h3 id="sendTitle">Send quote</h3><button id="sendClose" class="btn-ghost btn-sm">Close</button></div>
+    <div class="field"><label for="sendTo">To</label><input id="sendTo" type="email" placeholder="customer@example.com"></div>
+    <div class="field"><label for="sendSubject">Subject</label><input id="sendSubject"></div>
+    <div class="field"><label for="sendBody">Message</label><textarea id="sendBody" rows="9"></textarea></div>
+    <div class="send-actions">
+      <button id="sendMailto" class="btn">Open in email app</button>
+      <button id="sendMarkSent" class="btn-ghost">Mark as sent</button>
+    </div>
+    <p class="hint">Opens your email app with everything filled in — Quotely never sends mail itself, so there's nothing to configure and no account to connect.</p>
   </div>
 </div>
 

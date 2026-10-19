@@ -52,6 +52,15 @@ SIGNPILOT_URL=http://localhost:3003 npm start   # auto-request SignPilot approva
 - `POST /api/analyze-photo` `{dataUrl, trade}` → `{observations, items}` (needs `OPENAI_API_KEY`; 503 `no-key` otherwise)
 - `GET /api/health` → `{ok, version, openai, signpilot}`
 
+### Optional/upsell line items
+Line items may carry `optional: true`. Optional lines are **excluded** from the quote totals (which run subtotal → discount → tax → total → deposit on the base items only) and reported separately as `totals.optionsTotal`. On the document they print in their own "Optional add-ons — pick any" section, with a "Total with all options" figure. The flag survives save, edit, duplicate, version restore, and site-visit import/upsert.
+
+### Internal notes (private, never printed)
+Quotes carry an `internalNotes` string (private margin targets, strategy — saved on create, updatable via `PUT`, carried through duplicate). It shows in the job-file rail on the quote detail view and **never** appears in the printed document.
+
+### Send quote (delivery flow)
+The UI's Send dialog pre-composes a subject + message (quote number, total, deposit, validity, terms, warranty) and opens the owner's email app via `mailto:` — Quotely never sends mail itself, so nothing is configured. A one-click "Mark as sent" flips the quote to `sent` through the normal `PUT` status contract.
+
 ## Trades pipeline — quotely-ai is the office back-end
 
 Quotely sits in the middle of the trades flywheel: **SiteVisit AI** (field capture) → **Quotely AI** (quoting + billing) → **SignPilot AI** (paper trail). All three stay standalone repos; they talk over localhost HTTP, configured with two env vars:
@@ -83,8 +92,8 @@ Won quotes can grow: `POST /api/quotes/:id/change-orders` `{description, items[]
 
 ## Tests
 ```bash
-bash test/smoke.sh   # 100 checks: files, syntax, server, endpoints, photos, templates, history, price bank, import, change orders, milestones, materials export, signpilot wiring
-bash test/e2e.sh     # 35 checks: generate → save → photos → follow-up → win/loss → restart persistence + full pipeline flow against a stub signpilot-ai
+bash test/smoke.sh   # 112 checks: files, syntax, server, endpoints, photos, templates, history, price bank, import, change orders, milestones, materials export, signpilot wiring, optional items, internal notes
+bash test/e2e.sh     # 37 checks: generate → save → photos → follow-up → win/loss → restart persistence + full pipeline flow against a stub signpilot-ai + import upsert with optional items
 ```
 
 ## Screenshots

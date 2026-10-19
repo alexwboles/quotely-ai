@@ -19,6 +19,8 @@
     custFilter: "",
     editingId: null,
     detailId: null,
+    bank: null,
+    sendId: null,
     settings: loadSettings()
   };
 
@@ -82,7 +84,7 @@
     state.editingId = null;
     state.items = [];
     state.photos = [];
-    ["description", "customer", "phone", "email", "followUp", "notes", "warranty"].forEach(function (id) { $(id).value = ""; });
+    ["description", "customer", "phone", "email", "followUp", "notes", "internalNotes", "warranty"].forEach(function (id) { $(id).value = ""; });
     $("taxRate").value = 0; $("discountRate").value = 0; $("depositRate").value = 25; $("validDays").value = 30;
     $("payTerms").value = "Due on receipt";
     $("genSource").textContent = ""; $("saveMsg").textContent = "";
@@ -97,7 +99,7 @@
     if (!q) return;
     state.editingId = id;
     state.items = (q.items || []).map(function (i) {
-      return { description: i.description, qty: i.qty, unit: i.unit, unitPrice: i.unitPrice };
+      return { description: i.description, qty: i.qty, unit: i.unit, unitPrice: i.unitPrice, optional: Boolean(i.optional) };
     });
     state.photos = (q.photos || []).map(function (p) {
       return { dataUrl: p.dataUrl, caption: p.caption || "", tag: p.tag || "", addedAt: p.addedAt || Date.now(), analysis: null, ai: null };
@@ -115,6 +117,7 @@
     $("payTerms").value = q.paymentTerms || "Due on receipt";
     $("warranty").value = q.warranty || "";
     $("notes").value = q.notes || "";
+    $("internalNotes").value = q.internalNotes || "";
     $("genSource").textContent = ""; $("saveMsg").textContent = "";
     $("newTitle").textContent = "Edit quote " + (q.number || "");
     $("saveBtn").textContent = "Save changes";
@@ -312,7 +315,7 @@
       b.addEventListener("click", function () {
         var p = state.photos[Number(b.dataset.aiadd)];
         (p.ai.items || []).forEach(function (it) {
-          state.items.push({ description: it.description, qty: it.qty || 1, unit: it.unit || "each", unitPrice: it.unitPrice || 0 });
+          state.items.push({ description: it.description, qty: it.qty || 1, unit: it.unit || "each", unitPrice: it.unitPrice || 0, optional: false });
         });
         renderItems(); renderPreview();
         document.getElementById("itemsTable").scrollIntoView({ behavior: "smooth", block: "center" });
@@ -345,17 +348,19 @@
     renderPhotoGrid();
   }
 
-  /* ---------- line items table ---------- */
+  /* ---------- line items table (with optional/upsell toggle) ---------- */
   function renderItems() {
     var body = $("itemsBody");
     body.innerHTML = "";
     state.items.forEach(function (it, i) {
       var tr = document.createElement("tr");
+      if (it.optional) tr.className = "is-optional";
       tr.innerHTML =
         '<td><input data-i="' + i + '" data-f="description" value="' + esc(it.description) + '" placeholder="Describe the work…" aria-label="Line item description"></td>' +
         '<td><input data-i="' + i + '" data-f="qty" type="number" min="0" step="any" value="' + it.qty + '" aria-label="Quantity"></td>' +
         '<td><input data-i="' + i + '" data-f="unit" value="' + esc(it.unit) + '" aria-label="Unit"></td>' +
         '<td><input data-i="' + i + '" data-f="unitPrice" type="number" min="0" step="any" value="' + it.unitPrice + '" aria-label="Unit price"></td>' +
+        '<td><span class="opt-check"><input type="checkbox" data-i="' + i + '" data-f="optional"' + (it.optional ? " checked" : "") + ' aria-label="Optional add-on" title="Optional add-on"></span></td>' +
         '<td class="num row-total"><strong>' + money(Quotely.lineTotal(it)) + "</strong></td>" +
         '<td><button class="btn-danger btn-sm" data-del="' + i + '" aria-label="Remove line">✕</button></td>';
       body.appendChild(tr);
@@ -363,7 +368,9 @@
     body.querySelectorAll("input").forEach(function (inp) {
       inp.addEventListener("input", function () {
         var i = Number(inp.dataset.i), f = inp.dataset.f;
-        state.items[i][f] = (f === "qty" || f === "unitPrice") ? Number(inp.value) : inp.value;
+        state.items[i][f] = f === "optional" ? inp.checked
+          : (f === "qty" || f === "unitPrice") ? Number(inp.value) : inp.value;
+        inp.closest("tr").classList.toggle("is-optional", Boolean(state.items[i].optional));
         renderPreview();
         inp.closest("tr").querySelector(".row-total").innerHTML = "<strong>" + money(Quotely.lineTotal(state.items[i])) + "</strong>";
       });
@@ -377,9 +384,75 @@
   }
 
   $("addLineBtn").addEventListener("click", function () {
-    state.items.push({ description: "", qty: 1, unit: "each", unitPrice: 0 });
+    state.items.push({ description: "", qty: 1, unit: "each", unitPrice: 0, optional: false });
     renderItems(); renderPreview();
   });
+
+  /* ---------- price bank picker (JobNimbus Products & Services pattern) ---------- */
+  function bankItems() {
+    if (state.bank) return state.bank;
+    try { state.bank = Quotely.priceBank(); }
+    catch (e) { state.bank = null; }
+    if (!state.bank) return null;
+    return state.bank;
+  }
+
+  function openBank() {
+    var bank = bankItems();
+    if (!bank) { alert("Price bank unavailable."); return; }
+    var sel = $("bankTrade");
+    var cur = tradeSel.value;
+    sel.innerHTML = '<option value="">All trades</option>' + bank.trades.map(function (t) {
+      return '<option value="' + esc(t) + '"' + (t === cur ? " selected" : "") + ">" + esc(t) + "</option>";
+    }).join("");
+    $("bankSearch").value = "";
+    renderBankList();
+    $("bankModal").classList.remove("hidden");
+    $("bankSearch").focus();
+  }
+
+  function renderBankList() {
+    var bank = bankItems();
+    if (!bank) return;
+    var trade = $("bankTrade").value;
+    var q = $("bankSearch").value.toLowerCase().trim();
+    var list = bank.items.filter(function (it) {
+      if (trade && it.trades.indexOf(trade) === -1) return false;
+      if (q) {
+        var hay = (it.name + " " + it.keys.join(" ") + " " + it.unit).toLowerCase();
+        if (hay.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+    var host = $("bankList");
+    if (!list.length) {
+      host.innerHTML = '<div class="bank-empty">Nothing in the price bank matches. Try a different trade or search.</div>';
+      return;
+    }
+    host.innerHTML = "";
+    list.forEach(function (it) {
+      var row = document.createElement("div");
+      row.className = "bank-row";
+      row.innerHTML =
+        '<div class="bank-name">' + esc(it.name) + '<div class="bank-trade">' + esc(it.trades.join(" · ")) + "</div></div>" +
+        '<div class="bank-price">' + money(it.price) + ' <span class="bank-unit">/ ' + esc(it.unit) + "</span></div>" +
+        '<button class="btn-ghost btn-sm">Add</button>';
+      row.querySelector("button").addEventListener("click", function () {
+        state.items.push({ description: it.name, qty: 1, unit: it.unit, unitPrice: it.price, optional: false });
+        renderItems(); renderPreview();
+        showToast("Added: " + it.name);
+      });
+      host.appendChild(row);
+    });
+  }
+
+  $("bankBtn").addEventListener("click", openBank);
+  $("bankClose").addEventListener("click", function () { $("bankModal").classList.add("hidden"); });
+  $("bankModal").addEventListener("click", function (e) {
+    if (e.target === $("bankModal")) $("bankModal").classList.add("hidden");
+  });
+  $("bankTrade").addEventListener("change", renderBankList);
+  $("bankSearch").addEventListener("input", renderBankList);
 
   /* ---------- generate ---------- */
   $("generateBtn").addEventListener("click", async function () {
@@ -403,7 +476,9 @@
       items = Quotely.generateLineItems(desc, trade);
       source = "local";
     }
-    state.items = items;
+    state.items = items.map(function (it) {
+      return { description: it.description, qty: it.qty, unit: it.unit, unitPrice: it.unitPrice, optional: Boolean(it.optional) };
+    });
     renderItems(); renderPreview();
     msg.textContent = items.length + " line item" + (items.length === 1 ? "" : "s") +
       " drafted (" + (source === "openai" ? "AI enhanced" : "built-in estimator") +
@@ -416,24 +491,39 @@
     return new Date(base + (Number(q.validDays) || 30) * 864e5).toLocaleDateString();
   }
 
+  function docItemRow(it) {
+    return "<tr><td><div class=\"item-name\">" + esc(it.description) + "</div></td>" +
+      '<td class="num">' + it.qty + " " + esc(it.unit) + "</td>" +
+      '<td class="num">' + money(it.unitPrice) + "</td>" +
+      '<td class="num"><strong>' + money(Quotely.lineTotal(it)) + "</strong></td></tr>";
+  }
+
   function sheetHTML(q) {
     var s = state.settings;
-    var rows = (q.items || []).map(function (it) {
-      return "<tr><td><div class=\"item-name\">" + esc(it.description) + "</div></td>" +
-        '<td class="num">' + it.qty + " " + esc(it.unit) + "</td>" +
-        '<td class="num">' + money(it.unitPrice) + "</td>" +
-        '<td class="num"><strong>' + money(Quotely.lineTotal(it)) + "</strong></td></tr>";
-    }).join("");
-    var t = q.totals || Quotely.quoteTotals(q.items || [], q.taxRate, q.depositRate);
+    var baseItems = (q.items || []).filter(function (i) { return !i.optional; });
+    var optItems = (q.items || []).filter(function (i) { return i.optional; });
+    var rows = baseItems.map(docItemRow).join("");
+    var t = q.totals || Quotely.quoteTotals(q.items || [], q.taxRate, q.depositRate, q.discountRate);
+    var optionsTotal = Number(t.optionsTotal) || 0;
     var coLine = [s.companyPhone, s.companyEmail, s.companyAddress].filter(Boolean).join(" · ");
     var custLine = [q.phone, q.email].filter(Boolean).join(" · ");
+    var optBlock = optItems.length
+      ? '<div class="doc-options"><h4>Optional add-ons — pick any</h4>' +
+        '<table class="doc-items"><tbody>' +
+        optItems.map(function (it) {
+          return '<tr class="opt-line"><td><div class="item-name">' + esc(it.description) + "</div></td>" +
+            '<td class="num">' + it.qty + " " + esc(it.unit) + "</td>" +
+            '<td class="num">' + money(it.unitPrice) + "</td>" +
+            '<td class="num"><strong>' + money(Quotely.lineTotal(it)) + "</strong></td></tr>";
+        }).join("") + "</tbody></table></div>"
+      : "";
     return '<div class="doc-head"><div>' +
         (s.logo ? '<img class="doc-logo" src="' + s.logo + '" alt="company logo">' : "") +
         '<div class="doc-co">' + esc(s.companyName || "Your Company") + "</div>" +
         (coLine ? '<div class="doc-co-sub">' + esc(coLine) + "</div>" : "") +
       "</div>" +
       '<div class="doc-meta"><div class="doc-kicker">QUOTE</div>' +
-        "<div><strong>" + esc(q.number || "") + "</strong></div>" +
+        '<div class="doc-number">' + esc(q.number || "") + "</div>" +
         "<div>Date: " + new Date(q.createdAt || Date.now()).toLocaleDateString() + "</div>" +
         "<div>Valid until: " + validUntilOf(q) + "</div></div></div>" +
       '<div class="doc-parties"><div><h4>Prepared for</h4>' +
@@ -445,10 +535,15 @@
       "</div></div>" +
       '<table class="doc-items"><thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Amount</th></tr></thead>' +
       "<tbody>" + (rows || '<tr><td colspan="4" style="color:var(--muted)">No line items yet — generate or add some.</td></tr>') + "</tbody></table>" +
+      optBlock +
       '<table class="doc-totals"><tr><td>Subtotal</td><td class="num" id="totSub">' + money(t.subtotal) + "</td></tr>" +
       (t.discount ? "<tr><td>Discount (" + esc(q.discountRate || "0") + "%)</td>" + '<td class="num" id="totDisc">−' + money(t.discount) + "</td></tr>" : "") +
       "<tr><td>Tax (" + esc(q.taxRate || "0") + "%)</td>" + '<td class="num" id="totTax">' + money(t.tax) + "</td></tr>" +
       '<tr class="grand"><td>Total</td><td class="num" id="totTotal">' + money(t.total) + "</td></tr>" +
+      (optionsTotal > 0
+        ? '<tr><td>Optional add-ons (not included)</td><td class="num" id="totOpt">' + money(optionsTotal) + "</td></tr>" +
+          '<tr class="with-options"><td>Total with all options</td><td class="num" id="totAll">' + money(Number(t.total) + optionsTotal) + "</td></tr>"
+        : "") +
       "<tr><td>Deposit due (" + esc(q.depositRate || "0") + "%)</td>" + '<td class="num" id="totDep">' + money(t.deposit) + "</td></tr>" +
       '<tr><td>Balance on completion</td><td class="num" id="totBal">' + money(t.balance) + "</td></tr></table>" +
       '<div class="doc-terms"><strong>Payment terms:</strong> ' + esc(q.paymentTerms || "Due on receipt") +
@@ -494,6 +589,10 @@
     if (t.discount) tweenMoney("totDisc", -t.discount);
     tweenMoney("totTax", t.tax);
     tweenMoney("totTotal", t.total);
+    if (t.optionsTotal > 0) {
+      tweenMoney("totOpt", t.optionsTotal);
+      tweenMoney("totAll", Number(t.total) + Number(t.optionsTotal));
+    }
     tweenMoney("totDep", t.deposit);
     tweenMoney("totBal", t.balance);
   }
@@ -543,7 +642,8 @@
       trade: tradeSel.value, description: $("description").value,
       items: state.items, photos: state.photos.map(function (p) { return { dataUrl: p.dataUrl, caption: p.caption, tag: p.tag, addedAt: p.addedAt }; }),
       taxRate: $("taxRate").value, discountRate: $("discountRate").value, depositRate: $("depositRate").value,
-      followUp: $("followUp").value, notes: $("notes").value, validDays: $("validDays").value,
+      followUp: $("followUp").value, notes: $("notes").value, internalNotes: $("internalNotes").value,
+      validDays: $("validDays").value,
       paymentTerms: $("payTerms").value, warranty: $("warranty").value
     };
     try {
@@ -587,6 +687,12 @@
       (expired ? ' <span class="badge expired">expired</span>' : "");
   }
 
+  function quoteAge(createdAt) {
+    if (!createdAt) return "";
+    var days = Math.max(0, Math.round((Date.now() - new Date(createdAt).getTime()) / 864e5));
+    return days === 0 ? "today" : days === 1 ? "1 day" : days + " days";
+  }
+
   function renderDashboard() {
     var qs = state.quotes;
     var today = new Date().toISOString().slice(0, 10);
@@ -612,19 +718,7 @@
     $("kpiFollowSub").textContent = due.length ? "reach out today" : "all caught up";
     $("kpiFollow").classList.toggle("good", false);
 
-    var order = ["draft", "sent", "won", "lost"];
-    var labels = { draft: "Draft", sent: "Sent", won: "Won", lost: "Lost" };
-    $("pipeGrid").innerHTML = "";
-    order.forEach(function (s) {
-      var grp = qs.filter(function (x) { return x.status === s; });
-      var val = grp.reduce(function (a, x) { return a + totalsOf(x); }, 0);
-      var cell = document.createElement("button");
-      cell.className = "pipe-cell";
-      cell.setAttribute("aria-label", labels[s] + " quotes: " + grp.length);
-      cell.innerHTML = '<div class="pipe-status">' + labels[s] + '</div><div class="pipe-num">' + grp.length + '</div><div class="pipe-val">' + money(val) + "</div>";
-      cell.addEventListener("click", function () { setQuoteFilter(s); });
-      $("pipeGrid").appendChild(cell);
-    });
+    renderBoard(qs);
 
     var recent = qs.slice().sort(function (a, b) { return String(b.createdAt || "").localeCompare(String(a.createdAt || "")); }).slice(0, 5);
     var rb = $("recentBody");
@@ -636,7 +730,7 @@
       rb.innerHTML = "";
       recent.forEach(function (x) {
         var tr = document.createElement("tr");
-        tr.innerHTML = '<td><a class="qlink" data-open="' + x.id + '" href="#">' + esc(x.number) + "</a></td>" +
+        tr.innerHTML = '<td><a class="qlink mono-num" data-open="' + x.id + '" href="#">' + esc(x.number) + "</a></td>" +
           '<td class="t-cust">' + esc(x.customer || "—") + "</td>" +
           '<td class="num t-num">' + money(totalsOf(x)) + "</td>" +
           "<td>" + badgeHTML(x.status, Quotely.isQuoteExpired(x)) + "</td>";
@@ -664,6 +758,50 @@
       });
     }
     renderTopCustomers();
+  }
+
+  /* ---------- pipeline board (JobNimbus-boards spirit) ---------- */
+  function renderBoard(qs) {
+    var host = $("boardGrid");
+    host.innerHTML = "";
+    var order = ["draft", "sent", "won", "lost"];
+    var labels = { draft: "Draft", sent: "Sent", won: "Won", lost: "Lost" };
+    order.forEach(function (s) {
+      var grp = qs.filter(function (x) { return x.status === s; })
+        .sort(function (a, b) { return String(b.createdAt || "").localeCompare(String(a.createdAt || "")); });
+      var val = grp.reduce(function (a, x) { return a + totalsOf(x); }, 0);
+      var col = document.createElement("div");
+      col.className = "board-col";
+      col.setAttribute("role", "button");
+      col.setAttribute("tabindex", "0");
+      col.setAttribute("aria-label", labels[s] + " quotes: " + grp.length + ", " + money(val));
+      var cards = grp.slice(0, 4).map(function (x) {
+        var fuCls = followUpClass(x.followUp);
+        var fu = x.followUp && (x.status === "draft" || x.status === "sent")
+          ? '<div class="board-fu ' + (fuCls === "due" ? "due" : fuCls === "soon" ? "soon" : "") + '">↻ ' + esc(x.followUp) + "</div>"
+          : "";
+        return '<div class="board-card st-' + x.status + '" data-open-card="' + x.id + '">' +
+          '<div class="board-who">' + esc(x.customer || "Unnamed") + "</div>" +
+          '<div class="board-num">' + esc(x.number) + " · " + esc(quoteAge(x.createdAt)) + "</div>" +
+          '<div class="board-amt">' + money(totalsOf(x)) + "</div>" + fu + "</div>";
+      }).join("");
+      if (!grp.length) cards = '<div class="board-empty">No ' + labels[s].toLowerCase() + " quotes</div>";
+      if (grp.length > 4) cards += '<div class="board-more">+' + (grp.length - 4) + " more</div>";
+      col.innerHTML =
+        '<div class="board-col-head"><div class="board-col-name">' + labels[s] + "</div>" +
+        '<div class="board-col-num">' + grp.length + "</div>" +
+        '<div class="board-col-val">' + money(val) + "</div></div>" +
+        '<div class="board-cards">' + cards + "</div>";
+      col.addEventListener("click", function (e) {
+        var card = e.target.closest("[data-open-card]");
+        if (card) { openDetail(card.dataset.openCard); return; }
+        setQuoteFilter(s);
+      });
+      col.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setQuoteFilter(s); }
+      });
+      host.appendChild(col);
+    });
   }
 
   function setQuoteFilter(s) {
@@ -741,6 +879,7 @@
         ? '<span class="' + (fuCls === "due" ? "fu-due" : fuCls === "soon" ? "fu-soon" : "fu-none") + '">' + esc(x.followUp) + "</span>"
         : '<span class="fu-none">—</span>';
       var acts = '<button class="btn-ghost btn-sm" data-act="open">Open</button>';
+      if (x.status === "draft" || x.status === "sent") acts += '<button class="btn-ghost btn-sm" data-act="send">Send</button>';
       if (x.status === "draft") acts += '<button class="btn-ghost btn-sm" data-act="sent">Mark sent</button>';
       if (x.status !== "won") acts += '<button class="btn-ghost btn-sm" data-act="won">Won</button>';
       if (x.status !== "lost") acts += '<button class="btn-ghost btn-sm" data-act="lost">Lost</button>';
@@ -749,7 +888,7 @@
         '<button class="btn-ghost btn-sm" data-act="history">History</button>' +
         '<button class="btn-danger btn-sm" data-act="del">Delete</button>';
       tr.innerHTML =
-        '<td><a class="qlink" data-act="open" href="#">' + esc(x.number) + "</a></td>" +
+        '<td><a class="qlink mono-num" data-act="open" href="#">' + esc(x.number) + "</a></td>" +
         '<td class="t-cust">' + esc(x.customer || "—") + "</td>" +
         '<td class="t-sub">' + esc(x.trade || "—") + "</td>" +
         '<td class="num t-num">' + money(totalsOf(x)) + "</td>" +
@@ -761,6 +900,7 @@
           e.preventDefault();
           var act = b.dataset.act;
           if (act === "open") openDetail(x.id);
+          else if (act === "send") openSend(x.id);
           else quoteAction(x.id, act);
         });
       });
@@ -800,21 +940,78 @@
     } catch (e) { alert("Couldn't reach the server."); }
   }
 
-  /* ---------- quote detail (Jobber-style) ---------- */
+  /* ---------- send quote (delivery flow: compose -> mail app -> mark sent) ---------- */
+  function openSend(id) {
+    var q = state.quotes.filter(function (x) { return x.id === id; })[0];
+    if (!q) return;
+    state.sendId = id;
+    var s = state.settings;
+    $("sendTitle").textContent = "Send quote " + (q.number || "");
+    $("sendTo").value = q.email || "";
+    $("sendSubject").value = "Quote " + (q.number || "") + " from " + (s.companyName || "your contractor") + " — " + money(totalsOf(q));
+    var lines = [
+      "Hi " + (q.customer || "there") + ",",
+      "",
+      "Here's your quote " + (q.number || "") + (q.description ? " for " + q.description : "") + ".",
+      "",
+      "Quote total: " + money(totalsOf(q)) + " (valid until " + validUntilOf(q) + ")",
+      "Deposit due to book: " + money((q.totals && q.totals.deposit) || 0),
+      ""
+    ];
+    if (q.paymentTerms) lines.push("Payment terms: " + q.paymentTerms);
+    if (q.warranty) lines.push("Warranty: " + q.warranty);
+    lines.push("", "Reply to this email or call " + (s.companyPhone || "") + " to approve — I'll get you on the schedule.", "", "— " + (s.companyName || ""), s.companyPhone || "");
+    $("sendBody").value = lines.filter(function (l, i) { return l !== "" || lines[i - 1] !== ""; }).join("\n");
+    $("sendModal").classList.remove("hidden");
+  }
+  $("sendClose").addEventListener("click", function () { $("sendModal").classList.add("hidden"); });
+  $("sendModal").addEventListener("click", function (e) {
+    if (e.target === $("sendModal")) $("sendModal").classList.add("hidden");
+  });
+  $("sendMailto").addEventListener("click", function () {
+    var to = $("sendTo").value.trim();
+    var href = "mailto:" + encodeURIComponent(to) +
+      "?subject=" + encodeURIComponent($("sendSubject").value) +
+      "&body=" + encodeURIComponent($("sendBody").value);
+    window.location.href = href;
+    showToast("Email drafted — hit send in your mail app");
+  });
+  $("sendMarkSent").addEventListener("click", async function () {
+    var id = state.sendId;
+    if (!id) return;
+    try {
+      var r = await fetch("/api/quotes/" + id, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "sent" })
+      });
+      if (!r.ok) throw new Error("update failed");
+      $("sendModal").classList.add("hidden");
+      showToast("Quote marked sent");
+      await loadQuotes();
+      if (state.detailId) openDetail(state.detailId);
+    } catch (e) { alert("Couldn't reach the server."); }
+  });
+
+  /* ---------- quote detail: the job file ---------- */
   function openDetail(id) {
     var q = state.quotes.filter(function (x) { return x.id === id; })[0];
     if (!q) { showView("quotes"); return; }
     state.detailId = id;
     var expired = Quotely.isQuoteExpired(q);
+    $("detailStamp").textContent = (q.number || "") + " · FILED " + new Date(q.createdAt || Date.now()).toLocaleDateString();
     $("detailCust").textContent = q.customer || "Unnamed customer";
-    $("detailSub").textContent = q.number + "  ·  " + (q.trade || "") +
+    $("detailSub").innerHTML = '<span class="mono">' + esc(q.number || "") + "</span>  ·  " + esc(q.trade || "") +
       "  ·  Created " + new Date(q.createdAt || Date.now()).toLocaleDateString() +
       "  ·  Valid until " + validUntilOf(q) +
-      (q.followUp ? "  ·  Follow up " + q.followUp : "");
+      (q.followUp ? "  ·  Follow up " + esc(q.followUp) : "") +
+      (q.importedFrom && q.importedFrom.visitId ? '  ·  <span class="badge sent">sitevisit import</span>' : "");
     $("detailBadges").innerHTML = badgeHTML(q.status, expired);
     $("detailTotal").textContent = money(totalsOf(q));
+    var optT = (q.totals && Number(q.totals.optionsTotal)) || 0;
+    $("detailTotalSub").textContent = optT > 0 ? "+" + money(optT) + " in optional add-ons" : "";
     $("detailDoc").innerHTML = sheetHTML(q);
     renderDetailActions(q);
+    renderRail(q);
     renderPipeline(q);
     showView("detail");
   }
@@ -822,12 +1019,13 @@
   function renderDetailActions(q) {
     var host = $("detailActions");
     var h = '<button class="btn-ghost btn-sm" data-dact="edit">Edit</button>';
+    if (q.status === "draft" || q.status === "sent") h += '<button class="btn btn-sm" data-dact="send">Send</button>';
     if (q.status === "draft") {
-      h += '<button class="btn btn-sm" data-dact="sent">Mark sent</button>';
+      h += '<button class="btn-ghost btn-sm" data-dact="sent">Mark sent</button>';
       h += '<button class="btn-ghost btn-sm" data-dact="won">Won</button>';
       h += '<button class="btn-ghost btn-sm" data-dact="lost">Lost</button>';
     } else if (q.status === "sent") {
-      h += '<button class="btn btn-sm" data-dact="won">Mark won</button>';
+      h += '<button class="btn-ghost btn-sm" data-dact="won">Mark won</button>';
       h += '<button class="btn-ghost btn-sm" data-dact="lost">Mark lost</button>';
     } else {
       h += '<button class="btn-ghost btn-sm" data-dact="sent">Reopen</button>';
@@ -841,10 +1039,50 @@
       b.addEventListener("click", function () {
         var act = b.dataset.dact;
         if (act === "edit") startEdit(q.id);
+        else if (act === "send") openSend(q.id);
         else if (act === "print") window.print();
         else quoteAction(q.id, act);
       });
     });
+  }
+
+  function renderRail(q) {
+    // customer card
+    var rc = $("railCustomer");
+    var contact = [];
+    if (q.phone) contact.push('<div class="rc-line">' + esc(q.phone) + "</div>");
+    if (q.email) contact.push('<div class="rc-line"><a href="mailto:' + esc(q.email) + '">' + esc(q.email) + "</a></div>");
+    if (q.followUp) contact.push('<div class="rc-line">Follow up: <strong>' + esc(q.followUp) + "</strong></div>");
+    rc.innerHTML = '<div class="rc-name">' + esc(q.customer || "Unnamed customer") + "</div>" +
+      (contact.length ? contact.join("") : '<div class="rc-line" style="color:var(--faint)">No contact details</div>');
+    // internal note (never prints)
+    var ri = $("railInternal");
+    if (q.internalNotes) {
+      ri.innerHTML = '<div class="rail-note">' + esc(q.internalNotes) + "</div>";
+    } else {
+      ri.innerHTML = '<div class="rail-note empty">No internal note — add one when editing. It never prints on the quote.</div>';
+    }
+    // billing summary
+    var ms = q.milestones || [];
+    var paid = ms.filter(function (m) { return m.status === "paid"; }).reduce(function (a, m) { return a + Number(m.amount || 0); }, 0);
+    var billed = ms.filter(function (m) { return m.status === "billed"; }).reduce(function (a, m) { return a + Number(m.amount || 0); }, 0);
+    var rb = $("railBilling");
+    if (ms.length) {
+      var dueMs = ms.filter(function (m) { return m.status !== "paid"; }).length;
+      rb.innerHTML =
+        '<div class="rail-bill-row"><span>Milestones</span><span class="num">' + (ms.length - dueMs) + " of " + ms.length + " paid</span></div>" +
+        '<div class="rail-bill-row"><span>Collected</span><span class="num">' + money(paid) + "</span></div>" +
+        '<div class="rail-bill-row"><span>Billed, unpaid</span><span class="num">' + money(billed) + "</span></div>" +
+        '<div class="rail-bill-row"><span>Project total</span><span class="num">' + money(q.revisedTotal != null ? q.revisedTotal : totalsOf(q)) + "</span></div>";
+    } else {
+      rb.innerHTML = '<div class="rail-note empty">No billing schedule yet — apply one from the pipeline below once the quote is won.</div>';
+    }
+    // history
+    var hist = Array.isArray(q.history) ? q.history : [];
+    $("railHistory").innerHTML =
+      '<div class="hist-mini">' + hist.length + " earlier version" + (hist.length === 1 ? "" : "s") + " saved.</div>" +
+      '<button class="linklike" id="railHistBtn">View version history</button>';
+    $("railHistBtn").addEventListener("click", function () { openHistory(q.id); });
   }
 
   /* ---------- job pipeline (sitevisit -> quotely -> signpilot -> done) ---------- */
@@ -873,7 +1111,7 @@
 
   function renderPipeline(q) {
     var host = $("pipelineBody");
-    $("pipelineHint").textContent = "Won → signed approval → job done → completion sign-off";
+    $("pipelineHint").textContent = "Won → signed → done";
     var sp = q.signpilot || {};
     var co = q.completion || {};
     var cos = q.changeOrders || [];
@@ -882,7 +1120,7 @@
     var h = "";
 
     // source
-    h += '<div class="pipe-row"><div class="pipe-label">Source</div><div class="pipe-val">';
+    h += '<div class="pipe-block"><div class="pipe-label">Source</div><div class="pipe-val">';
     if (q.importedFrom && q.importedFrom.visitId) {
       h += pipeBadge("SiteVisit import", "sent") +
         ' <span class="hint">Visit ' + esc(q.importedFrom.visitNumber || q.importedFrom.visitId) +
@@ -893,16 +1131,17 @@
     h += "</div></div>";
 
     // client approval
-    h += '<div class="pipe-row"><div class="pipe-label">Client approval</div><div class="pipe-val">';
+    h += '<div class="pipe-block"><div class="pipe-label">Client approval</div><div class="pipe-val">';
     if (sp.docId) {
       var spCls = sp.status === "signed" ? "won" : sp.status === "declined" ? "lost" : "sent";
       h += pipeBadge(sp.status === "pending" ? "awaiting signature" : sp.status, spCls) +
         ' <span class="hint">SignPilot ' + esc(sp.docNumber || "") +
-        (sp.signedAt ? " · signed " + esc(sp.signedAt.slice(0, 10)) : "") + "</span> " +
-        '<button class="btn-ghost btn-sm" data-pipe="sync-sp">Check signing status</button>';
-      if (sp.status === "declined") h += ' <button class="btn-ghost btn-sm" data-pipe="req-approval">Request again</button>';
+        (sp.signedAt ? " · signed " + esc(sp.signedAt.slice(0, 10)) : "") + "</span>" +
+        '<div class="pipe-actions"><button class="btn-ghost btn-sm" data-pipe="sync-sp">Check signing status</button>';
+      if (sp.status === "declined") h += '<button class="btn-ghost btn-sm" data-pipe="req-approval">Request again</button>';
+      h += "</div>";
     } else if (q.status === "won") {
-      h += '<span class="hint">No approval requested yet.</span> <button class="btn btn-sm" data-pipe="req-approval">Request client approval</button>';
+      h += '<span class="hint">No approval requested yet.</span><div class="pipe-actions"><button class="btn btn-sm" data-pipe="req-approval">Request client approval</button></div>';
     } else {
       h += '<span class="hint">Mark the quote won to request a signed client approval via SignPilot.</span>';
     }
@@ -910,9 +1149,9 @@
     h += "</div></div>";
 
     // change orders
-    h += '<div class="pipe-row"><div class="pipe-label">Change orders</div><div class="pipe-val">';
+    h += '<div class="pipe-block"><div class="pipe-label">Change orders</div><div class="pipe-val">';
     if (cos.length) {
-      h += '<table class="tbl pipe-tbl"><thead><tr><th></th><th>Change</th><th class="num">Cost impact</th><th>Status</th><th></th></tr></thead><tbody>' +
+      h += '<div class="table-wrap"><table class="tbl pipe-tbl"><thead><tr><th></th><th>Change</th><th class="num">Impact</th><th>Status</th><th></th></tr></thead><tbody>' +
         cos.map(function (c) {
           var acts = "";
           if (c.status === "proposed") acts += '<button class="btn-ghost btn-sm" data-co-approve="' + c.id + '">Approve</button> ';
@@ -925,49 +1164,49 @@
             '<td class="num">' + (c.costDelta < 0 ? "−" : "+") + money(Math.abs(c.costDelta)) + "</td>" +
             "<td>" + pipeBadge(c.status, c.status === "signed" || c.status === "approved" ? "won" : "draft") + " " + spb + "</td>" +
             "<td>" + acts + "</td></tr>";
-        }).join("") + "</tbody></table>";
+        }).join("") + "</tbody></table></div>";
       h += '<div class="hint">Revised project total: <strong>' + money(revised) + "</strong> (quote " + money(totalsOf(q)) + " + approved changes)</div>";
     } else {
       h += '<span class="hint">None yet.</span> ';
     }
     if (q.status === "won") {
       h += '<div class="co-form"><input id="coDesc" placeholder="Change description — e.g. Add heated floor in master bath" aria-label="Change description">' +
-        '<input id="coDelta" type="number" step="any" placeholder="$ impact (− for credit)" style="width:190px" aria-label="Cost impact">' +
+        '<input id="coDelta" type="number" step="any" placeholder="$ impact (− for credit)" style="width:170px" aria-label="Cost impact">' +
         '<button class="btn-ghost btn-sm" data-pipe="add-co">Add change order</button></div>';
     }
     h += "</div></div>";
 
     // milestones
-    h += '<div class="pipe-row"><div class="pipe-label">Milestones</div><div class="pipe-val">';
+    h += '<div class="pipe-block"><div class="pipe-label">Milestones</div><div class="pipe-val">';
     if (ms.length) {
-      h += '<table class="tbl pipe-tbl"><thead><tr><th>Milestone</th><th class="num">%</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead><tbody>' +
+      h += '<div class="table-wrap"><table class="tbl pipe-tbl"><thead><tr><th>Milestone</th><th class="num">%</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead><tbody>' +
         ms.map(function (m) {
           var next = m.status === "pending" ? "billed" : m.status === "billed" ? "paid" : null;
           return "<tr><td><strong>" + esc(m.name) + "</strong></td>" +
             '<td class="num">' + m.pct + "%</td>" + '<td class="num">' + money(m.amount) + "</td>" +
             "<td>" + pipeBadge(m.status, m.status === "paid" ? "won" : m.status === "billed" ? "sent" : "draft") + "</td>" +
             "<td>" + (next ? '<button class="btn-ghost btn-sm" data-ms="' + m.id + "|" + next + '">Mark ' + next + "</button>" : "") + "</td></tr>";
-        }).join("") + "</tbody></table>";
+        }).join("") + "</tbody></table></div>";
     } else {
       h += '<span class="hint">No billing schedule yet.</span> ';
     }
-    if (q.status === "won") h += '<button class="btn-ghost btn-sm" data-pipe="apply-ms">Apply deposit → rough-in → final</button> <span class="hint">Re-applying refreshes amounts from the revised total.</span>';
+    if (q.status === "won") h += '<div class="pipe-actions"><button class="btn-ghost btn-sm" data-pipe="apply-ms">Apply deposit → rough-in → final</button></div><span class="hint">Re-applying refreshes amounts from the revised total.</span>';
     h += "</div></div>";
 
     // materials
-    h += '<div class="pipe-row"><div class="pipe-label">Materials</div><div class="pipe-val">' +
-      '<button class="btn-ghost btn-sm" data-pipe="ml-json">Export materials list (JSON)</button> ' +
-      '<button class="btn-ghost btn-sm" data-pipe="ml-csv">Export CSV</button> ' +
+    h += '<div class="pipe-block"><div class="pipe-label">Materials</div><div class="pipe-val">' +
+      '<div class="pipe-actions"><button class="btn-ghost btn-sm" data-pipe="ml-json">Export materials list (JSON)</button> ' +
+      '<button class="btn-ghost btn-sm" data-pipe="ml-csv">Export CSV</button></div> ' +
       '<span class="hint">Shaped for MaterialList AI — import the JSON into its library (see README).</span></div></div>';
 
     // completion
-    h += '<div class="pipe-row"><div class="pipe-label">Completion</div><div class="pipe-val">';
+    h += '<div class="pipe-block"><div class="pipe-label">Completion</div><div class="pipe-val">';
     if (co.docId) {
       h += pipeBadge(co.status === "signed" ? "signed off" : co.status, co.status === "signed" ? "won" : "sent") +
         ' <span class="hint">SignPilot ' + esc(co.docNumber || "") +
         (co.signedAt ? " · signed " + esc(co.signedAt.slice(0, 10)) : "") + "</span>";
     } else if (q.status === "won") {
-      h += '<button class="btn-ghost btn-sm" data-pipe="req-completion">Request completion sign-off</button> <span class="hint">Client confirms the work is done to their satisfaction.</span>';
+      h += '<div class="pipe-actions"><button class="btn-ghost btn-sm" data-pipe="req-completion">Request completion sign-off</button></div> <span class="hint">Client confirms the work is done to their satisfaction.</span>';
     } else {
       h += '<span class="hint">Available once the quote is won.</span>';
     }
@@ -1061,7 +1300,7 @@
           var n = (v.items || []).length;
           var total = v.totals && v.totals.total != null ? money(v.totals.total) : "—";
           return '<div class="hist-row"><div><strong>' + new Date(v.at).toLocaleString() + "</strong>" +
-            '<div class="hint">' + n + " line item" + (n === 1 ? "" : "s") + " · total " + total + "</div></div>" +
+            '<div class="hint"><span class="mono">' + n + " line item" + (n === 1 ? "" : "s") + " · total " + total + "</span></div></div>" +
             '<button class="btn-ghost btn-sm" data-restore="' + i + '">Restore this version</button></div>';
         }).join("")
       : '<p class="hint">No earlier versions — edits to the line items are snapshotted here automatically.</p>';
@@ -1100,7 +1339,7 @@
     var sel = $("templateSel");
     var ts = state.templates || [];
     sel.innerHTML = '<option value="">Apply a saved template…</option>' + ts.map(function (t) {
-      return '<option value="' + t.id + '">' + esc(t.name) + " (" + t.items.length + " items · " + esc(t.trade) + ")</option>";
+      return '<option value="' + t.id + '">' + esc(t.name) + " (" + (t.items || []).length + " items · " + esc(t.trade) + ")</option>";
     }).join("");
   }
   $("applyTemplateBtn").addEventListener("click", function () {
@@ -1110,7 +1349,7 @@
     if (!t) return;
     if (state.items.length && !confirm("Replace the current line items with this template?")) return;
     state.items = t.items.map(function (i) {
-      return { description: i.description, qty: i.qty, unit: i.unit, unitPrice: i.unitPrice };
+      return { description: i.description, qty: i.qty, unit: i.unit, unitPrice: i.unitPrice, optional: Boolean(i.optional) };
     });
     renderItems(); renderPreview();
     showToast("Template applied");

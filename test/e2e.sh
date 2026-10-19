@@ -224,6 +224,18 @@ stop_srv
 start_srv
 ok "flow13: stub signpilot torn down, server back without SIGNPILOT_URL"
 
+# ---- Flow 14: sitevisit import preserves optional items + upsert keeps them ----
+IM14=$(curl -s -X POST "$BASE/api/quotes/import" -H 'Content-Type: application/json' \
+  -d '{"visitId":"v-e2e-14","visitNumber":"V-101","customer":"Import Ivy","trade":"Plumbing","items":[{"description":"Water heater swap","qty":1,"unit":"each","unitPrice":1450},{"description":"Expansion tank add-on","qty":1,"unit":"each","unitPrice":180,"optional":true}],"taxPct":0,"discountPct":0}')
+QID14=$(echo "$IM14" | python3 -c "import json,sys; print(json.load(sys.stdin)['quote']['id'])")
+T14=$(echo "$IM14" | python3 -c "import json,sys; d=json.load(sys.stdin)['quote']; print(d['totals']['total'], d['totals']['optionsTotal'], d['importedFrom']['visitId'])")
+[ "$T14" = "1450 180 v-e2e-14" ] || [ "$T14" = "1450.0 180.0 v-e2e-14" ] && ok "flow14: import keeps optional out of total (1450 + 180 options)" || bad "flow14: $T14"
+IM14B=$(curl -s -X POST "$BASE/api/quotes/import" -H 'Content-Type: application/json' \
+  -d '{"visitId":"v-e2e-14","customer":"Import Ivy","trade":"Plumbing","items":[{"description":"Water heater swap","qty":1,"unit":"each","unitPrice":1450},{"description":"Expansion tank add-on","qty":1,"unit":"each","unitPrice":180,"optional":true}],"taxPct":0}')
+C14=$(echo "$IM14B" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['created'], d['quote']['totals']['total'])")
+[ "$C14" = "False 1450" ] || [ "$C14" = "False 1450.0" ] && ok "flow14: re-send upserts (no duplicate), optional math intact" || bad "flow14 upsert: $C14"
+curl -s -X DELETE "$BASE/api/quotes/$QID14" >/dev/null
+
 # ---- Flow 7: delete cleans up ----
 curl -s -X DELETE "$BASE/api/quotes/$ID1" >/dev/null
 curl -s -X DELETE "$BASE/api/quotes/$ID2" >/dev/null

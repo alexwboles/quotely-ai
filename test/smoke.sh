@@ -347,16 +347,72 @@ CBBAD=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/quotes/$IID/si
 curl -s -X DELETE "$BASE/api/quotes/$IID" >/dev/null
 ok "pipeline test quote cleaned up"
 
-# 33. pipeline UI wiring
+# 33. pipeline UI wiring (job-file rail modules)
 missing3=""
 for n in discountRate pipelineBody pipelineHint renderPipeline 'data-pipe="ml-json"' 'data-pipe="apply-ms"' coDesc; do
   grep -q "$n" "$DIR/public/app.js" || missing3="$missing3 js:$n"
 done
-for n in discountRate pipelineBody pipelinePanel grid-3; do
+for n in discountRate pipelineBody pipelineHint rail-pipeline railBilling grid-3; do
   grep -q "$n" "$DIR/public/index.html" || missing3="$missing3 html:$n"
 done
-grep -q 'pipe-row' "$DIR/public/style.css" || missing3="$missing3 css:pipe-row"
-[ -z "$missing3" ] && ok "UI wires discount + job pipeline panel" || bad "missing wiring:$missing3"
+grep -q 'pipe-block' "$DIR/public/style.css" || missing3="$missing3 css:pipe-block"
+[ -z "$missing3" ] && ok "UI wires discount + job pipeline rail" || bad "missing wiring:$missing3"
+
+# 34. optional/upsell line items: excluded from totals, reported as optionsTotal
+OQ=$(curl -s -X POST "$BASE/api/quotes" -H 'Content-Type: application/json' \
+  -d '{"customer":"Optional Test","trade":"Plumbing","items":[{"description":"Faucet replacement","qty":2,"unit":"each","unitPrice":145},{"description":"Water filtration add-on","qty":1,"unit":"each","unitPrice":399,"optional":true}],"taxRate":0,"depositRate":0}')
+OID=$(echo "$OQ" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+OT=$(echo "$OQ" | python3 -c "import json,sys; d=json.load(sys.stdin)['totals']; print(d['total'], d['optionsTotal'])")
+[ "$OT" = "290 399" ] || [ "$OT" = "290.0 399.0" ] && ok "optional item excluded from total (290), optionsTotal=399 ($OT)" || bad "optional totals wrong: $OT"
+echo "$OQ" | grep -q '"optional":true' && ok "optional flag survives cleanItems" || bad "optional flag dropped"
+# totals exclude optional in the client-shared math too
+node -e 'const Q=require("'"$DIR"'/public/generate.js");const t=Q.quoteTotals([{qty:1,unitPrice:100},{qty:1,unitPrice:50,optional:true}],0,0,0);if(t.total===100&&t.optionsTotal===50)console.log("ok");else{console.error(JSON.stringify(t));process.exit(1)}' >/dev/null 2>&1 \
+  && ok "generate.js quoteTotals: optional excluded in shared math" || bad "generate.js optional math wrong"
+# duplicate carries optional flag; edit keeps it
+OD=$(curl -s -X POST "$BASE/api/quotes/$OID/duplicate")
+echo "$OD" | grep -q '"optional":true' && ok "duplicate carries optional flag" || bad "duplicate dropped optional"
+ODID=$(echo "$OD" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+curl -s -X DELETE "$BASE/api/quotes/$ODID" >/dev/null
+curl -s -X DELETE "$BASE/api/quotes/$OID" >/dev/null
+ok "optional test quotes cleaned up"
+
+# 35. internal note: saved, updated, duplicated, never in totals math
+IQ=$(curl -s -X POST "$BASE/api/quotes" -H 'Content-Type: application/json' \
+  -d '{"customer":"Internal Test","trade":"Electrical","items":[{"description":"x","qty":1,"unit":"each","unitPrice":10}],"notes":"Customer sees this","internalNotes":"Hold 45% margin"}')
+IID2=$(echo "$IQ" | python3 -c "import json,sys; print(json.load(sys.stdin)['internalNotes'])")
+[ "$IID2" = "Hold 45% margin" ] && ok "internalNotes saved on create" || bad "internalNotes missing: ${IQ:0:200}"
+IQID=$(echo "$IQ" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+IU=$(curl -s -X PUT "$BASE/api/quotes/$IQID" -H 'Content-Type: application/json' -d '{"internalNotes":"Updated private note"}')
+echo "$IU" | grep -q '"internalNotes":"Updated private note"' && ok "internalNotes updated via PUT" || bad "internalNotes PUT failed"
+IDUP=$(curl -s -X POST "$BASE/api/quotes/$IQID/duplicate" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['id'], d['internalNotes'])")
+[ "$(echo "$IDUP" | cut -d' ' -f2-)" = "Updated private note" ] && ok "duplicate carries internalNotes" || bad "duplicate internalNotes: $IDUP"
+curl -s -X DELETE "$BASE/api/quotes/$IQID" >/dev/null
+curl -s -X DELETE "$BASE/api/quotes/$(echo "$IDUP" | cut -d' ' -f1)" >/dev/null
+ok "internal-note test quotes cleaned up"
+
+# 36. price bank contract intact (owned by quotely, consumed by sitevisit-ai)
+PB=$(curl -s "$BASE/api/price-bank")
+echo "$PB" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+assert d['version'] == '1.0.0', d['version']
+assert d['currency'] == 'USD'
+assert isinstance(d['items'], list) and len(d['items']) >= 71, len(d['items'])
+assert 'Flooring' in d['trades']
+it = d['items'][0]
+assert set(it) == {'trades','keys','name','unit','price'}, it
+print('bank ok', len(d['items']), 'items')
+" >/dev/null && ok "price bank v1.0.0 contract intact (71+ items, 10 trades)" || bad "price bank contract broken"
+# client-side price bank matches (builder picker uses it offline)
+node -e 'const Q=require("'"$DIR"'/public/generate.js");const b=Q.priceBank();if(b.version==="1.0.0"&&b.items.length>=71&&b.trades.length>=10)console.log("ok");else process.exit(1)' >/dev/null 2>&1 \
+  && ok "client-side priceBank() matches served contract" || bad "client priceBank mismatch"
+
+# 37. new UI surfaces present
+missing4=""
+for n in bankModal sendModal boardGrid railCustomer railInternal 'data-pipe="sync-sp"' openBank openSend step-num; do
+  grep -q "$n" "$DIR/public/app.js" "$DIR/public/index.html" >/dev/null 2>&1 || missing4="$missing4 $n"
+done
+[ -z "$missing4" ] && ok "new UI surfaces wired (price bank, send, board, job-file rail)" || bad "missing:$missing4"
 
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

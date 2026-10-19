@@ -220,10 +220,14 @@
     return Math.round(q * p * 100) / 100;
   }
 
-  /* Quote totals: subtotal -> discount -> tax -> total -> deposit.
-   * discountRate is a percent (0-100, clamped); 0 preserves the old math. */
+  /* Quote totals: optional/upsell line items are excluded from the base
+   * math and reported separately as optionsTotal (customer can add them).
+   * subtotal -> discount -> tax -> total -> deposit. discountRate is a
+   * percent (0-100, clamped); 0 preserves the old math. */
   function quoteTotals(items, taxRate, depositRate, discountRate) {
-    var subtotal = items.reduce(function (a, i) { return a + lineTotal(i); }, 0);
+    var options = items.filter(function (i) { return i && i.optional; });
+    var base = items.filter(function (i) { return !(i && i.optional); });
+    var subtotal = base.reduce(function (a, i) { return a + lineTotal(i); }, 0);
     subtotal = Math.round(subtotal * 100) / 100;
     var d = Math.min(100, Math.max(0, Number(discountRate) || 0));
     var discount = Math.round(subtotal * d / 100 * 100) / 100;
@@ -231,7 +235,8 @@
     var tax = Math.round(taxable * (Number(taxRate) || 0) / 100 * 100) / 100;
     var total = Math.round((taxable + tax) * 100) / 100;
     var deposit = Math.round(total * (Number(depositRate) || 0) / 100 * 100) / 100;
-    return { subtotal: subtotal, discountRate: d, discount: discount, tax: tax, total: total, deposit: deposit, balance: Math.round((total - deposit) * 100) / 100 };
+    var optionsTotal = Math.round(options.reduce(function (a, i) { return a + lineTotal(i); }, 0) * 100) / 100;
+    return { subtotal: subtotal, discountRate: d, discount: discount, tax: tax, total: total, deposit: deposit, balance: Math.round((total - deposit) * 100) / 100, optionsTotal: optionsTotal };
   }
 
   /* Second sweep: quote expiry — validity deadline = createdAt + validDays.

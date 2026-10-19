@@ -231,7 +231,8 @@ function cleanItems(items) {
       description: String(i.description || "").slice(0, 200),
       qty: Math.max(0, Number(i.qty) || 0),
       unit: String(i.unit || "each").slice(0, 20),
-      unitPrice: Math.max(0, Math.round((Number(i.unitPrice) || 0) * 100) / 100)
+      unitPrice: Math.max(0, Math.round((Number(i.unitPrice) || 0) * 100) / 100),
+      optional: Boolean(i.optional) // upsell line item: excluded from totals, shown separately
     }));
 }
 
@@ -592,6 +593,7 @@ function buildQuote(body, quotes, importedFrom) {
     importedFrom: importedFrom || null,
     followUp: String(body.followUp || "").slice(0, 10),
     notes: String(body.notes || "").slice(0, 2000),
+    internalNotes: String(body.internalNotes || "").slice(0, 2000), // private: never printed on the document
     validDays: Number(body.validDays) || 30,
     paymentTerms: cleanTerms(body.paymentTerms),
     warranty: String(body.warranty || "").slice(0, 500),
@@ -828,6 +830,7 @@ async function handleApi(req, res) {
       importedFrom: null,
       followUp: "",
       notes: src.notes || "",
+      internalNotes: src.internalNotes || "",
       validDays: Number(src.validDays) || 30,
       paymentTerms: cleanTerms(src.paymentTerms),
       warranty: String(src.warranty || "").slice(0, 500),
@@ -1067,11 +1070,13 @@ async function handleApi(req, res) {
       const body = await readBody(req, 20e6);
       const q = quotes[idx];
       const prevStatus = q.status;
-      const allowed = ["status", "followUp", "notes", "customer", "phone", "email", "company", "trade", "description", "taxRate", "depositRate", "discountRate", "validDays", "items", "photos", "paymentTerms", "warranty", "importedFrom"];
+      const allowed = ["status", "followUp", "notes", "internalNotes", "customer", "phone", "email", "company", "trade", "description", "taxRate", "depositRate", "discountRate", "validDays", "items", "photos", "paymentTerms", "warranty", "importedFrom"];
       for (const k of allowed) {
         if (body[k] === undefined) continue;
         if (k === "paymentTerms") {
           q.paymentTerms = cleanTerms(body.paymentTerms);
+        } else if (k === "internalNotes") {
+          q.internalNotes = String(body.internalNotes || "").slice(0, 2000);
         } else if (k === "warranty") {
           q.warranty = String(body.warranty || "").slice(0, 500);
         } else if (k === "importedFrom") {
