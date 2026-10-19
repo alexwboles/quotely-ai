@@ -216,5 +216,147 @@ grep -q 'badge expired' "$DIR/public/app.js" || missing2="$missing2 expired-badg
 grep -q 'data-status="expired"' "$DIR/public/index.html" || missing2="$missing2 expired-filter"
 [ -z "$missing2" ] && ok "UI wires terms/warranty/duplicate/expiry" || bad "missing wiring:$missing2"
 
+# 26. price bank: versioned canonical bank owned by quotely-ai
+PB=$(curl -s "$BASE/api/price-bank")
+echo "$PB" | grep -q '"version":"1.0.0"' && ok "price bank version 1.0.0" || bad "price bank version: ${PB:0:120}"
+echo "$PB" | grep -q '"servedBy":"quotely-ai"' && ok "price bank servedBy quotely-ai" || bad "servedBy missing"
+echo "$PB" | grep -q '"currency":"USD"' && ok "price bank currency USD" || bad "currency missing"
+NITEMS=$(echo "$PB" | python3 -c "import json,sys; print(len(json.load(sys.stdin)['items']))")
+[ "$NITEMS" -ge 60 ] && ok "price bank has $NITEMS line items" || bad "item count: $NITEMS"
+node -e "
+var Q=require('$DIR/public/generate.js');
+var b=Q.priceBank();
+if(b.version!=='1.0.0') throw new Error('version');
+b.items.forEach(function(e){ if(!Array.isArray(e.trades)||!Array.isArray(e.keys)||!e.name||!e.unit||e.price==null) throw new Error('bad entry '+e.name); });
+if(b.items.filter(function(e){return e.trades.indexOf('Flooring')!==-1;}).length<3) throw new Error('flooring trade missing');
+" && ok "priceBank() entries have canonical {trades,keys,name,unit,price} shape" || bad "priceBank shape"
+
+# 27. GET single quote + discountRate math
+Q1=$(curl -s -X POST "$BASE/api/quotes" -H 'Content-Type: application/json' \
+  -d '{"customer":"Single Test","trade":"Plumbing","items":[{"description":"x","qty":1,"unit":"each","unitPrice":100}],"taxRate":0,"discountRate":10,"depositRate":0}')
+Q1ID=$(echo "$Q1" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "$Q1" | grep -q '"discountRate":10' && echo "$Q1" | grep -q '"discount":10' && echo "$Q1" | grep -q '"total":90' \
+  && ok "POST saves discountRate (100 -10% = 90 total)" || bad "discount math: ${Q1:0:300}"
+G1=$(curl -s "$BASE/api/quotes/$Q1ID")
+echo "$G1" | grep -q "\"id\":\"$Q1ID\"" && ok "GET /api/quotes/:id returns the quote" || bad "single fetch: ${G1:0:120}"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/quotes/nope999")" = "404" ] && ok "GET unknown quote -> 404" || bad "single 404"
+U1=$(curl -s -X PUT "$BASE/api/quotes/$Q1ID" -H 'Content-Type: application/json' -d '{"discountRate":150}')
+echo "$U1" | grep -q '"discountRate":100' && ok "PUT clamps discountRate to 100" || bad "discount clamp: ${U1:0:200}"
+curl -s -X DELETE "$BASE/api/quotes/$Q1ID" >/dev/null
+
+# 28. sitevisit import: create + upsert (a sitevisit draft IS a quotely quote)
+IMP='{"source":"sitevisit-ai","visitId":"sv-test-1","visitNumber":"SV-2026-0001","customer":"Import Case","address":"1 Main St","trade":"Plumbing","description":"faucet drips","items":[{"description":"Faucet replacement (parts + labor)","qty":1,"unit":"each","unitPrice":145}],"photos":[],"taxPct":8,"discountPct":10,"status":"draft"}'
+IMPR=$(curl -s -X POST "$BASE/api/quotes/import" -H 'Content-Type: application/json' -d "$IMP")
+IID=$(echo "$IMPR" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "$IMPR" | grep -q '"created":true' && [ -n "$IID" ] && ok "import creates quotely quote from sitevisit draft" || bad "import failed: ${IMPR:0:250}"
+echo "$IMPR" | grep -q '"visitId":"sv-test-1"' && ok "importedFrom.visitId stored" || bad "importedFrom missing"
+echo "$IMPR" | grep -q '"discountRate":10' && ok "import maps discountPct -> discountRate" || bad "discount map"
+echo "$IMPR" | grep -q 'Site: 1 Main St' && ok "import keeps site address in notes" || bad "address lost"
+echo "$IMPR" | grep -q '"total":140.94' && ok "import totals: 145 -10% +8% tax = 140.94" || bad "import totals: ${IMPR:0:300}"
+IMPR2=$(curl -s -X POST "$BASE/api/quotes/import" -H 'Content-Type: application/json' -d "$IMP")
+IID2=$(echo "$IMPR2" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "$IMPR2" | grep -q '"created":false' && [ "$IID2" = "$IID" ] \
+  && ok "re-import upserts the same quote (no duplicate)" || bad "upsert failed: ${IMPR2:0:250}"
+IMPBAD=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/quotes/import" -H 'Content-Type: application/json' -d '{"customer":"x"}')
+[ "$IMPBAD" = "400" ] && ok "import requires visitId" || bad "import validation: $IMPBAD"
+
+# 29. change orders: draft rejected, won flow with revised total
+[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/quotes/$IID/change-orders" -H 'Content-Type: application/json' -d '{"description":"x","costDelta":50}')" = "400" ] \
+  && ok "change order on draft quote rejected" || bad "change order allowed on draft"
+curl -s -X PUT "$BASE/api/quotes/$IID" -H 'Content-Type: application/json' -d '{"status":"won"}' >/dev/null
+CO=$(curl -s -X POST "$BASE/api/quotes/$IID/change-orders" -H 'Content-Type: application/json' -d '{"description":"Add shut-off valves","costDelta":85.5}')
+COID=$(echo "$CO" | grep -o '"id":"co_[^"]*"' | head -1 | cut -d'"' -f4)
+echo "$CO" | grep -q '"number":"CO-1"' && [ -n "$COID" ] && ok "change order created as CO-1" || bad "change order: ${CO:0:250}"
+COA=$(curl -s -X POST "$BASE/api/quotes/$IID/change-orders/$COID/approve")
+echo "$COA" | grep -q '"status":"approved"' && ok "change order approved" || bad "approve: ${COA:0:200}"
+echo "$COA" | grep -q '"revisedTotal":226.44' && ok "revisedTotal = 140.94 + 85.50 = 226.44" || bad "revisedTotal: ${COA:0:200}"
+[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/quotes/$IID/change-orders/$COID/approve")" = "400" ] \
+  && ok "double-approve rejected" || bad "double approve allowed"
+COBAD=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/quotes/$IID/change-orders" -H 'Content-Type: application/json' -d '{"description":""}')
+[ "$COBAD" = "400" ] && ok "change order requires a description" || bad "change order validation: $COBAD"
+
+# 30. milestones: deposit -> rough-in -> final
+MSD=$(curl -s -X POST "$BASE/api/quotes" -H 'Content-Type: application/json' \
+  -d '{"customer":"Milestone Draft","trade":"Plumbing","items":[{"description":"x","qty":1,"unit":"each","unitPrice":10}],"taxRate":0,"depositRate":0}')
+MSDID=$(echo "$MSD" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/quotes/$MSDID/milestones" -H 'Content-Type: application/json' -d '{"template":"standard"}')" = "400" ] \
+  && ok "milestones on draft quote rejected" || bad "milestones allowed on draft"
+curl -s -X DELETE "$BASE/api/quotes/$MSDID" >/dev/null
+MS=$(curl -s -X POST "$BASE/api/quotes/$IID/milestones" -H 'Content-Type: application/json' -d '{"template":"standard"}')
+echo "$MS" | grep -q '"name":"Deposit"' && echo "$MS" | grep -q '"name":"Rough-in"' && echo "$MS" | grep -q '"name":"Final"' \
+  && ok "milestone template: deposit -> rough-in -> final" || bad "milestones: ${MS:0:300}"
+echo "$MS" | grep -q '"amount":56.61' && echo "$MS" | grep -q '"amount":113.22' \
+  && ok "milestone amounts = 25/50/25% of revised 226.44" || bad "milestone amounts: ${MS:0:300}"
+MSID=$(echo "$MS" | grep -o '"id":"m_[^"]*"' | head -1 | cut -d'"' -f4)
+MSP=$(curl -s -X PATCH "$BASE/api/quotes/$IID/milestones/$MSID" -H 'Content-Type: application/json' -d '{"status":"billed"}')
+echo "$MSP" | grep -q '"status":"billed"' && ok "milestone -> billed" || bad "milestone patch: ${MSP:0:200}"
+[ "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/quotes/$IID/milestones/$MSID" -H 'Content-Type: application/json' -d '{"status":"bogus"}')" = "400" ] \
+  && ok "milestone rejects bad status" || bad "milestone status validation"
+MSP2=$(curl -s -X PATCH "$BASE/api/quotes/$IID/milestones/$MSID" -H 'Content-Type: application/json' -d '{"status":"paid"}')
+echo "$MSP2" | grep -q '"status":"paid"' && ok "milestone billed -> paid" || bad "milestone paid"
+
+# 31. materials-list export shaped for materiallist-ai
+ML=$(curl -s "$BASE/api/quotes/$IID/materials-list")
+echo "$ML" | grep -q '"format":"materiallist-ai/saved-list@1"' && ok "materials export format tag" || bad "format: ${ML:0:150}"
+echo "$ML" | grep -q '"mlTrade":"plumbing"' && ok "trade mapped to materiallist-ai plumbing bank" || bad "trade map"
+MLN=$(echo "$ML" | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d['entry']['items']))")
+[ "$MLN" -ge 1 ] && ok "materials takeoff has $MLN items" || bad "takeoff empty"
+echo "$ML" | python3 -c "import json,sys; d=json.load(sys.stdin); e=d['entry']; assert e['trade']=='plumbing' and isinstance(e['bought'],list) and e['wastePct']==10 and 'quantities' in e; print('shape ok')" >/dev/null \
+  && ok "export entry matches materiallist-ai saved-list shape" || bad "entry shape"
+echo "$ML" | grep -q '"importHint"' && ok "export documents the materiallist-ai import step" || bad "import hint missing"
+curl -s -D /tmp/ml-hdrs.txt "$BASE/api/quotes/$IID/materials-list?format=csv" -o /tmp/ml.csv
+grep -qi 'text/csv' /tmp/ml-hdrs.txt && head -1 /tmp/ml.csv | grep -q 'item,qty,unit' \
+  && ok "materials CSV export (text/csv with header)" || bad "CSV export"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/quotes/nope999/materials-list")" = "404" ] \
+  && ok "materials-list 404s on unknown quote" || bad "materials 404"
+# unmapped trade (Cleaning) falls back to quote line items, still shaped right
+CL=$(curl -s -X POST "$BASE/api/quotes" -H 'Content-Type: application/json' \
+  -d '{"customer":"Clean Case","trade":"Cleaning","items":[{"description":"Deep cleaning","qty":2,"unit":"hr","unitPrice":45}],"taxRate":0,"depositRate":0}')
+CLID=$(echo "$CL" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+MLC=$(curl -s "$BASE/api/quotes/$CLID/materials-list")
+echo "$MLC" | grep -q '"mlTrade":null' && echo "$MLC" | grep -q 'Deep cleaning (from quote)' \
+  && ok "unmapped trade falls back to quote line items" || bad "fallback: ${MLC:0:200}"
+curl -s -X DELETE "$BASE/api/quotes/$CLID" >/dev/null
+
+# 32. signpilot wiring: degraded gracefully without SIGNPILOT_URL, callback both ways
+[ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/quotes/$IID/signpilot-request" -H 'Content-Type: application/json' -d '{"purpose":"approval"}')" = "503" ] \
+  && ok "signpilot-request without SIGNPILOT_URL -> 503" || bad "signpilot-request 503"
+WQ=$(curl -s "$BASE/api/quotes/$IID")
+echo "$WQ" | grep -q '"status":"not-configured"' && ok "won quote records signpilot not-configured (no crash)" || bad "won-transition signpilot state"
+CB=$(curl -s -X POST "$BASE/api/quotes/$IID/signpilot-callback" -H 'Content-Type: application/json' \
+  -d '{"docId":"sp1","docNumber":"SP-2026-0001","purpose":"approval","status":"signed","signedAt":"2026-10-19T12:00:00.000Z"}')
+echo "$CB" | grep -q '"status":"signed"' && ok "signpilot callback marks approval signed" || bad "callback signed: ${CB:0:200}"
+CB2=$(curl -s -X POST "$BASE/api/quotes/$IID/signpilot-callback" -H 'Content-Type: application/json' \
+  -d '{"docId":"sp2","docNumber":"SP-2026-0002","purpose":"approval","status":"declined","declineReason":"too pricey"}')
+echo "$CB2" | grep -q '"status":"declined"' && ok "signpilot callback records decline" || bad "callback declined"
+G2=$(curl -s "$BASE/api/quotes/$IID")
+echo "$G2" | grep -q '"status":"sent"' && ok "declined approval reopens quote to sent" || bad "reopen on decline"
+echo "$G2" | grep -q 'too pricey' && ok "decline reason appended to quote notes" || bad "decline reason lost"
+CB3=$(curl -s -X POST "$BASE/api/quotes/$IID/signpilot-callback" -H 'Content-Type: application/json' \
+  -d "{\"docId\":\"sp3\",\"docNumber\":\"SP-2026-0003\",\"purpose\":\"change-order\",\"changeOrderId\":\"$COID\",\"status\":\"signed\",\"signedAt\":\"2026-10-19T13:00:00.000Z\"}")
+echo "$CB3" | grep -q '"status":"signed"' && ok "change-order callback marks it signed" || bad "co callback: ${CB3:0:200}"
+G3=$(curl -s "$BASE/api/quotes/$IID" | python3 -c "import json,sys; d=json.load(sys.stdin); co=[c for c in d['changeOrders'] if c['id']=='$COID'][0]; print(co['status'], co['signpilot']['status'])")
+[ "$G3" = "signed signed" ] && ok "change order shows signed in quote" || bad "co signed state: $G3"
+CB4=$(curl -s -X POST "$BASE/api/quotes/$IID/signpilot-callback" -H 'Content-Type: application/json' \
+  -d '{"docId":"sp4","docNumber":"SP-2026-0004","purpose":"completion","status":"signed","signedAt":"2026-10-19T14:00:00.000Z"}')
+echo "$CB4" | grep -q '"status":"signed"' && ok "completion callback accepted" || bad "completion callback"
+G4=$(curl -s "$BASE/api/quotes/$IID" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['completion']['status'], d.get('completedAt','')[:10])")
+[ "$G4" = "signed 2026-10-19" ] && ok "completion signed -> completedAt stamped" || bad "completion state: $G4"
+CBBAD=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/quotes/$IID/signpilot-callback" -H 'Content-Type: application/json' -d '{"purpose":"approval","status":"maybe"}')
+[ "$CBBAD" = "400" ] && ok "callback rejects bad status" || bad "callback validation: $CBBAD"
+curl -s -X DELETE "$BASE/api/quotes/$IID" >/dev/null
+ok "pipeline test quote cleaned up"
+
+# 33. pipeline UI wiring
+missing3=""
+for n in discountRate pipelineBody pipelineHint renderPipeline 'data-pipe="ml-json"' 'data-pipe="apply-ms"' coDesc; do
+  grep -q "$n" "$DIR/public/app.js" || missing3="$missing3 js:$n"
+done
+for n in discountRate pipelineBody pipelinePanel grid-3; do
+  grep -q "$n" "$DIR/public/index.html" || missing3="$missing3 html:$n"
+done
+grep -q 'pipe-row' "$DIR/public/style.css" || missing3="$missing3 css:pipe-row"
+[ -z "$missing3" ] && ok "UI wires discount + job pipeline panel" || bad "missing wiring:$missing3"
+
 echo "RESULT: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

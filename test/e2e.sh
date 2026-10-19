@@ -168,6 +168,62 @@ print(gen.stdout.strip())
 curl -s -X DELETE "$BASE/api/quotes/$ID12" >/dev/null
 curl -s -X DELETE "$BASE/api/quotes/$DID12" >/dev/null
 
+# ---- Flow 13: won -> signpilot approval request (stub signpilot-ai) ----
+STUB_PORT=3499
+node "$DIR/test/stub-signpilot.js" "$STUB_PORT" >/tmp/stub-signpilot.log 2>&1 &
+STUB=$!
+sleep 1
+kill -0 $STUB 2>/dev/null || { bad "stub signpilot failed to boot"; cat /tmp/stub-signpilot.log; }
+stop_srv
+export SIGNPILOT_URL="http://localhost:$STUB_PORT"
+start_srv
+QS=$(curl -s -X POST "$BASE/api/quotes" -H 'Content-Type: application/json' \
+  -d '{"customer":"Pipeline Pete","trade":"Electrical","description":"Panel upgrade","items":[{"description":"Breaker / panel work","qty":1,"unit":"each","unitPrice":350}],"taxRate":0,"depositRate":0}')
+QID13=$(echo "$QS" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+W13=$(curl -s -X PUT "$BASE/api/quotes/$QID13" -H 'Content-Type: application/json' -d '{"status":"won"}')
+echo "$W13" | grep -q '"docNumber":"SP-2026-0001"' && ok "flow13: won -> approval doc requested in signpilot" || bad "flow13: no doc: ${W13:0:300}"
+DOCS13=$(curl -s "http://localhost:$STUB_PORT/stub/docs")
+echo "$DOCS13" | grep -q '"template":"quote-approval"' && ok "flow13: stub received quote-approval doc" || bad "flow13: wrong template"
+echo "$DOCS13" | grep -q "\"quotelyQuoteId\":\"$QID13\"" && ok "flow13: doc carries quotelyQuoteId link" || bad "flow13: no link field"
+echo "$DOCS13" | grep -q '"total":350' && ok "flow13: approval total matches quote (350)" || bad "flow13: total wrong"
+DOCID13=$(echo "$DOCS13" | python3 -c "import json,sys; print(json.load(sys.stdin)['docs'][0]['id'])")
+# signpilot signs -> quotely callback updates the quote
+CB13=$(curl -s -X POST "$BASE/api/quotes/$QID13/signpilot-callback" -H 'Content-Type: application/json' \
+  -d "{\"docId\":\"$DOCID13\",\"docNumber\":\"SP-2026-0001\",\"purpose\":\"approval\",\"status\":\"signed\",\"signedAt\":\"2026-10-19T15:00:00.000Z\"}")
+echo "$CB13" | grep -q '"status":"signed"' && ok "flow13: signed callback -> approval signed" || bad "flow13 callback"
+# sync-signpilot polls the stub doc (flip it to sent first via stub control)
+curl -s -X POST "http://localhost:$STUB_PORT/stub/set-status" -H 'Content-Type: application/json' -d "{\"id\":\"$DOCID13\",\"status\":\"sent\"}" >/dev/null
+SY13=$(curl -s -X POST "$BASE/api/quotes/$QID13/sync-signpilot")
+echo "$SY13" | grep -q '"docStatus":"sent"' && ok "flow13: sync-signpilot polls doc status" || bad "flow13 sync: ${SY13:0:200}"
+# change order -> signpilot change-order doc -> signed callback
+CO13=$(curl -s -X POST "$BASE/api/quotes/$QID13/change-orders" -H 'Content-Type: application/json' -d '{"description":"Add whole-home surge protector","costDelta":275}')
+COID13=$(echo "$CO13" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+SPCO13=$(curl -s -X POST "$BASE/api/quotes/$QID13/signpilot-request" -H 'Content-Type: application/json' -d "{\"purpose\":\"change-order\",\"changeOrderId\":\"$COID13\"}")
+echo "$SPCO13" | grep -q '"purpose":"change-order"' && ok "flow13: change order sent to signpilot" || bad "flow13 co request: ${SPCO13:0:200}"
+DOCS13B=$(curl -s "http://localhost:$STUB_PORT/stub/docs")
+echo "$DOCS13B" | grep -q '"template":"change-order"' && echo "$DOCS13B" | grep -q "\"quotelyChangeOrderId\":\"$COID13\"" \
+  && ok "flow13: stub got change-order doc with link id" || bad "flow13: co doc wrong"
+CBCO13=$(curl -s -X POST "$BASE/api/quotes/$QID13/signpilot-callback" -H 'Content-Type: application/json' \
+  -d "{\"purpose\":\"change-order\",\"changeOrderId\":\"$COID13\",\"status\":\"signed\",\"signedAt\":\"2026-10-19T16:00:00.000Z\"}")
+echo "$CBCO13" | grep -q '"status":"signed"' && ok "flow13: change order signed via callback" || bad "flow13 co callback"
+# completion sign-off -> signed -> completedAt
+SPCP13=$(curl -s -X POST "$BASE/api/quotes/$QID13/signpilot-request" -H 'Content-Type: application/json' -d '{"purpose":"completion"}')
+echo "$SPCP13" | grep -q '"purpose":"completion"' && ok "flow13: completion sign-off requested" || bad "flow13 completion: ${SPCP13:0:200}"
+CBCP13=$(curl -s -X POST "$BASE/api/quotes/$QID13/signpilot-callback" -H 'Content-Type: application/json' \
+  -d '{"purpose":"completion","status":"signed","signedAt":"2026-10-19T17:00:00.000Z"}')
+GCP13=$(curl -s "$BASE/api/quotes/$QID13" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['completion']['status'], d.get('completedAt','')[:10])")
+[ "$GCP13" = "signed 2026-10-19" ] && ok "flow13: completion signed -> job marked complete" || bad "flow13 completion: $GCP13"
+# materials-list export on the pipeline quote
+ML13=$(curl -s "$BASE/api/quotes/$QID13/materials-list")
+echo "$ML13" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['mlTrade']=='electrical' and len(d['entry']['items'])>0; print('ml ok')" >/dev/null \
+  && ok "flow13: materials takeoff generated (electrical bank)" || bad "flow13 materials"
+curl -s -X DELETE "$BASE/api/quotes/$QID13" >/dev/null
+kill $STUB 2>/dev/null; wait $STUB 2>/dev/null
+unset SIGNPILOT_URL
+stop_srv
+start_srv
+ok "flow13: stub signpilot torn down, server back without SIGNPILOT_URL"
+
 # ---- Flow 7: delete cleans up ----
 curl -s -X DELETE "$BASE/api/quotes/$ID1" >/dev/null
 curl -s -X DELETE "$BASE/api/quotes/$ID2" >/dev/null

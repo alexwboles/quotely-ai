@@ -83,7 +83,7 @@
     state.items = [];
     state.photos = [];
     ["description", "customer", "phone", "email", "followUp", "notes", "warranty"].forEach(function (id) { $(id).value = ""; });
-    $("taxRate").value = 0; $("depositRate").value = 25; $("validDays").value = 30;
+    $("taxRate").value = 0; $("discountRate").value = 0; $("depositRate").value = 25; $("validDays").value = 30;
     $("payTerms").value = "Due on receipt";
     $("genSource").textContent = ""; $("saveMsg").textContent = "";
     $("newTitle").textContent = "New quote";
@@ -110,6 +110,7 @@
     $("followUp").value = q.followUp || "";
     $("validDays").value = q.validDays || 30;
     $("taxRate").value = q.taxRate || 0;
+    $("discountRate").value = q.discountRate || 0;
     $("depositRate").value = q.depositRate != null ? q.depositRate : 25;
     $("payTerms").value = q.paymentTerms || "Due on receipt";
     $("warranty").value = q.warranty || "";
@@ -445,6 +446,7 @@
       '<table class="doc-items"><thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Amount</th></tr></thead>' +
       "<tbody>" + (rows || '<tr><td colspan="4" style="color:var(--muted)">No line items yet — generate or add some.</td></tr>') + "</tbody></table>" +
       '<table class="doc-totals"><tr><td>Subtotal</td><td class="num" id="totSub">' + money(t.subtotal) + "</td></tr>" +
+      (t.discount ? "<tr><td>Discount (" + esc(q.discountRate || "0") + "%)</td>" + '<td class="num" id="totDisc">−' + money(t.discount) + "</td></tr>" : "") +
       "<tr><td>Tax (" + esc(q.taxRate || "0") + "%)</td>" + '<td class="num" id="totTax">' + money(t.tax) + "</td></tr>" +
       '<tr class="grand"><td>Total</td><td class="num" id="totTotal">' + money(t.total) + "</td></tr>" +
       "<tr><td>Deposit due (" + esc(q.depositRate || "0") + "%)</td>" + '<td class="num" id="totDep">' + money(t.deposit) + "</td></tr>" +
@@ -467,7 +469,7 @@
 
   /* ---------- builder preview ---------- */
   function currentTotals() {
-    return Quotely.quoteTotals(state.items, $("taxRate").value, $("depositRate").value);
+    return Quotely.quoteTotals(state.items, $("taxRate").value, $("depositRate").value, $("discountRate").value);
   }
 
   function renderPreview() {
@@ -481,7 +483,7 @@
       trade: tradeSel.value, description: $("description").value,
       items: state.items,
       photos: state.photos.map(function (p) { return { dataUrl: p.dataUrl, caption: p.caption, tag: p.tag, addedAt: p.addedAt }; }),
-      taxRate: $("taxRate").value, depositRate: $("depositRate").value,
+      taxRate: $("taxRate").value, discountRate: $("discountRate").value, depositRate: $("depositRate").value,
       totals: currentTotals(),
       followUp: $("followUp").value, notes: $("notes").value, validDays: $("validDays").value,
       paymentTerms: $("payTerms").value, warranty: $("warranty").value
@@ -489,6 +491,7 @@
     $("preview").innerHTML = sheetHTML(q);
     var t = q.totals;
     tweenMoney("totSub", t.subtotal);
+    if (t.discount) tweenMoney("totDisc", -t.discount);
     tweenMoney("totTax", t.tax);
     tweenMoney("totTotal", t.total);
     tweenMoney("totDep", t.deposit);
@@ -526,7 +529,7 @@
     return "Q-" + year + "-" + String(n).padStart(4, "0");
   }
 
-  ["taxRate", "depositRate", "notes", "customer", "phone", "email", "description", "validDays", "payTerms", "warranty"]
+  ["taxRate", "discountRate", "depositRate", "notes", "customer", "phone", "email", "description", "validDays", "payTerms", "warranty"]
     .forEach(function (id) { $(id).addEventListener("input", renderPreview); });
   tradeSel.addEventListener("change", renderPreview);
 
@@ -539,7 +542,7 @@
       customer: $("customer").value, phone: $("phone").value, email: $("email").value,
       trade: tradeSel.value, description: $("description").value,
       items: state.items, photos: state.photos.map(function (p) { return { dataUrl: p.dataUrl, caption: p.caption, tag: p.tag, addedAt: p.addedAt }; }),
-      taxRate: $("taxRate").value, depositRate: $("depositRate").value,
+      taxRate: $("taxRate").value, discountRate: $("discountRate").value, depositRate: $("depositRate").value,
       followUp: $("followUp").value, notes: $("notes").value, validDays: $("validDays").value,
       paymentTerms: $("payTerms").value, warranty: $("warranty").value
     };
@@ -777,10 +780,18 @@
         var dq = await dr.json();
         showToast("Duplicated as " + dq.number);
       } else {
-        await fetch("/api/quotes/" + id, {
+        var ur = await fetch("/api/quotes/" + id, {
           method: "PUT", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: act })
         });
+        if (act === "won" && ur.ok) {
+          var uq = await ur.json().catch(function () { return null; });
+          if (uq && uq.signpilot && uq.signpilot.docId) {
+            showToast("Marked won — client approval requested (" + uq.signpilot.docNumber + ")");
+          } else if (uq && uq.signpilot && uq.signpilot.status === "not-configured") {
+            showToast("Marked won — set SIGNPILOT_URL to auto-request approvals");
+          }
+        }
       }
       await loadQuotes();
       if (act === "del" && state.detailId === id) { state.detailId = null; showView("quotes"); }
@@ -804,6 +815,7 @@
     $("detailTotal").textContent = money(totalsOf(q));
     $("detailDoc").innerHTML = sheetHTML(q);
     renderDetailActions(q);
+    renderPipeline(q);
     showView("detail");
   }
 
@@ -832,6 +844,209 @@
         else if (act === "print") window.print();
         else quoteAction(q.id, act);
       });
+    });
+  }
+
+  /* ---------- job pipeline (sitevisit -> quotely -> signpilot -> done) ---------- */
+  function pipeBadge(txt, cls) {
+    return '<span class="badge ' + (cls || "draft") + '">' + esc(txt) + "</span>";
+  }
+
+  async function pipePost(url, body) {
+    var r = await fetch(url, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {})
+    });
+    var j = await r.json().catch(function () { return {}; });
+    if (!r.ok) throw new Error((j && (j.error || j.message)) || ("request failed (" + r.status + ")"));
+    return j;
+  }
+
+  function downloadFile(name, content, type) {
+    var blob = new Blob([content], { type: type || "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 600);
+  }
+
+  function renderPipeline(q) {
+    var host = $("pipelineBody");
+    $("pipelineHint").textContent = "Won → signed approval → job done → completion sign-off";
+    var sp = q.signpilot || {};
+    var co = q.completion || {};
+    var cos = q.changeOrders || [];
+    var ms = q.milestones || [];
+    var revised = q.revisedTotal != null ? q.revisedTotal : totalsOf(q);
+    var h = "";
+
+    // source
+    h += '<div class="pipe-row"><div class="pipe-label">Source</div><div class="pipe-val">';
+    if (q.importedFrom && q.importedFrom.visitId) {
+      h += pipeBadge("SiteVisit import", "sent") +
+        ' <span class="hint">Visit ' + esc(q.importedFrom.visitNumber || q.importedFrom.visitId) +
+        " — re-sending the visit updates this quote, never duplicates it.</span>";
+    } else {
+      h += '<span class="hint">Created in Quotely</span>';
+    }
+    h += "</div></div>";
+
+    // client approval
+    h += '<div class="pipe-row"><div class="pipe-label">Client approval</div><div class="pipe-val">';
+    if (sp.docId) {
+      var spCls = sp.status === "signed" ? "won" : sp.status === "declined" ? "lost" : "sent";
+      h += pipeBadge(sp.status === "pending" ? "awaiting signature" : sp.status, spCls) +
+        ' <span class="hint">SignPilot ' + esc(sp.docNumber || "") +
+        (sp.signedAt ? " · signed " + esc(sp.signedAt.slice(0, 10)) : "") + "</span> " +
+        '<button class="btn-ghost btn-sm" data-pipe="sync-sp">Check signing status</button>';
+      if (sp.status === "declined") h += ' <button class="btn-ghost btn-sm" data-pipe="req-approval">Request again</button>';
+    } else if (q.status === "won") {
+      h += '<span class="hint">No approval requested yet.</span> <button class="btn btn-sm" data-pipe="req-approval">Request client approval</button>';
+    } else {
+      h += '<span class="hint">Mark the quote won to request a signed client approval via SignPilot.</span>';
+    }
+    if (sp.error) h += ' <span class="hint">SignPilot unreachable (' + esc(sp.error) + ") — set SIGNPILOT_URL on the server, then request again.</span>";
+    h += "</div></div>";
+
+    // change orders
+    h += '<div class="pipe-row"><div class="pipe-label">Change orders</div><div class="pipe-val">';
+    if (cos.length) {
+      h += '<table class="tbl pipe-tbl"><thead><tr><th></th><th>Change</th><th class="num">Cost impact</th><th>Status</th><th></th></tr></thead><tbody>' +
+        cos.map(function (c) {
+          var acts = "";
+          if (c.status === "proposed") acts += '<button class="btn-ghost btn-sm" data-co-approve="' + c.id + '">Approve</button> ';
+          if ((!c.signpilot || !c.signpilot.docId || c.signpilot.status === "declined") && (c.status === "proposed" || c.status === "approved"))
+            acts += '<button class="btn-ghost btn-sm" data-co-sp="' + c.id + '">Send to SignPilot</button>';
+          var spb = c.signpilot && c.signpilot.docId
+            ? pipeBadge(c.signpilot.status === "signed" ? "signed" : c.signpilot.status, c.signpilot.status === "signed" ? "won" : "sent")
+            : "";
+          return "<tr><td><strong>" + esc(c.number) + "</strong></td><td>" + esc(c.description) + "</td>" +
+            '<td class="num">' + (c.costDelta < 0 ? "−" : "+") + money(Math.abs(c.costDelta)) + "</td>" +
+            "<td>" + pipeBadge(c.status, c.status === "signed" || c.status === "approved" ? "won" : "draft") + " " + spb + "</td>" +
+            "<td>" + acts + "</td></tr>";
+        }).join("") + "</tbody></table>";
+      h += '<div class="hint">Revised project total: <strong>' + money(revised) + "</strong> (quote " + money(totalsOf(q)) + " + approved changes)</div>";
+    } else {
+      h += '<span class="hint">None yet.</span> ';
+    }
+    if (q.status === "won") {
+      h += '<div class="co-form"><input id="coDesc" placeholder="Change description — e.g. Add heated floor in master bath" aria-label="Change description">' +
+        '<input id="coDelta" type="number" step="any" placeholder="$ impact (− for credit)" style="width:190px" aria-label="Cost impact">' +
+        '<button class="btn-ghost btn-sm" data-pipe="add-co">Add change order</button></div>';
+    }
+    h += "</div></div>";
+
+    // milestones
+    h += '<div class="pipe-row"><div class="pipe-label">Milestones</div><div class="pipe-val">';
+    if (ms.length) {
+      h += '<table class="tbl pipe-tbl"><thead><tr><th>Milestone</th><th class="num">%</th><th class="num">Amount</th><th>Status</th><th></th></tr></thead><tbody>' +
+        ms.map(function (m) {
+          var next = m.status === "pending" ? "billed" : m.status === "billed" ? "paid" : null;
+          return "<tr><td><strong>" + esc(m.name) + "</strong></td>" +
+            '<td class="num">' + m.pct + "%</td>" + '<td class="num">' + money(m.amount) + "</td>" +
+            "<td>" + pipeBadge(m.status, m.status === "paid" ? "won" : m.status === "billed" ? "sent" : "draft") + "</td>" +
+            "<td>" + (next ? '<button class="btn-ghost btn-sm" data-ms="' + m.id + "|" + next + '">Mark ' + next + "</button>" : "") + "</td></tr>";
+        }).join("") + "</tbody></table>";
+    } else {
+      h += '<span class="hint">No billing schedule yet.</span> ';
+    }
+    if (q.status === "won") h += '<button class="btn-ghost btn-sm" data-pipe="apply-ms">Apply deposit → rough-in → final</button> <span class="hint">Re-applying refreshes amounts from the revised total.</span>';
+    h += "</div></div>";
+
+    // materials
+    h += '<div class="pipe-row"><div class="pipe-label">Materials</div><div class="pipe-val">' +
+      '<button class="btn-ghost btn-sm" data-pipe="ml-json">Export materials list (JSON)</button> ' +
+      '<button class="btn-ghost btn-sm" data-pipe="ml-csv">Export CSV</button> ' +
+      '<span class="hint">Shaped for MaterialList AI — import the JSON into its library (see README).</span></div></div>';
+
+    // completion
+    h += '<div class="pipe-row"><div class="pipe-label">Completion</div><div class="pipe-val">';
+    if (co.docId) {
+      h += pipeBadge(co.status === "signed" ? "signed off" : co.status, co.status === "signed" ? "won" : "sent") +
+        ' <span class="hint">SignPilot ' + esc(co.docNumber || "") +
+        (co.signedAt ? " · signed " + esc(co.signedAt.slice(0, 10)) : "") + "</span>";
+    } else if (q.status === "won") {
+      h += '<button class="btn-ghost btn-sm" data-pipe="req-completion">Request completion sign-off</button> <span class="hint">Client confirms the work is done to their satisfaction.</span>';
+    } else {
+      h += '<span class="hint">Available once the quote is won.</span>';
+    }
+    h += "</div></div>";
+
+    host.innerHTML = h;
+    wirePipeline(q);
+  }
+
+  function reloadDetail(id) {
+    loadQuotes().then(function () { openDetail(id); });
+  }
+
+  function wirePipeline(q) {
+    var host = $("pipelineBody");
+    function on(sel, fn) {
+      host.querySelectorAll(sel).forEach(function (b) {
+        b.addEventListener("click", function () { fn(b); });
+      });
+    }
+    async function act(promise, okMsg) {
+      try {
+        await promise;
+        if (okMsg) showToast(okMsg);
+        reloadDetail(q.id);
+      } catch (e) { alert(e.message); }
+    }
+    on('[data-pipe="sync-sp"]', function () {
+      act(pipePost("/api/quotes/" + q.id + "/sync-signpilot"), "Signing status refreshed");
+    });
+    on('[data-pipe="req-approval"]', function () {
+      act(pipePost("/api/quotes/" + q.id + "/signpilot-request", { purpose: "approval" }),
+        "Approval request created in SignPilot");
+    });
+    on('[data-pipe="req-completion"]', function () {
+      act(pipePost("/api/quotes/" + q.id + "/signpilot-request", { purpose: "completion" }),
+        "Completion sign-off requested in SignPilot");
+    });
+    on('[data-pipe="add-co"]', function () {
+      var desc = $("coDesc").value.trim();
+      var delta = Number($("coDelta").value);
+      if (!desc) { alert("Describe the change first."); return; }
+      if (!isFinite(delta)) { alert("Enter the cost impact in dollars (negative for a credit)."); return; }
+      act(pipePost("/api/quotes/" + q.id + "/change-orders", { description: desc, costDelta: delta }),
+        "Change order added");
+    });
+    on("[data-co-approve]", function (b) {
+      act(pipePost("/api/quotes/" + q.id + "/change-orders/" + b.dataset.coApprove + "/approve"),
+        "Change order approved — project total updated");
+    });
+    on("[data-co-sp]", function (b) {
+      act(pipePost("/api/quotes/" + q.id + "/signpilot-request", { purpose: "change-order", changeOrderId: b.dataset.coSp }),
+        "Change order sent to SignPilot");
+    });
+    on("[data-ms]", function (b) {
+      var parts = b.dataset.ms.split("|");
+      fetch("/api/quotes/" + q.id + "/milestones/" + parts[0], {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: parts[1] })
+      }).then(function (r) {
+        if (!r.ok) throw new Error("update failed");
+        reloadDetail(q.id);
+      }).catch(function (e) { alert(e.message); });
+    });
+    on('[data-pipe="apply-ms"]', function () {
+      act(pipePost("/api/quotes/" + q.id + "/milestones", { template: "standard" }),
+        "Milestone schedule applied");
+    });
+    on('[data-pipe="ml-json"]', function () {
+      fetch("/api/quotes/" + q.id + "/materials-list").then(function (r) {
+        if (!r.ok) throw new Error("export failed");
+        return r.json();
+      }).then(function (j) {
+        downloadFile(q.number + "-materials.json", JSON.stringify(j.entry, null, 2));
+        showToast("Materials list exported — import it into MaterialList AI");
+      }).catch(function (e) { alert(e.message); });
+    });
+    on('[data-pipe="ml-csv"]', function () {
+      window.location = "/api/quotes/" + q.id + "/materials-list?format=csv";
     });
   }
 
