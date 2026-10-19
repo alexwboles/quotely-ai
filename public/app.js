@@ -28,7 +28,8 @@
     catch (e) { return {}; }
   }
   function saveSettings() {
-    localStorage.setItem("quotely_settings", JSON.stringify(state.settings));
+    try { localStorage.setItem("quotely_settings", JSON.stringify(state.settings)); }
+    catch (e) { /* private mode / storage unavailable: settings stay in memory */ }
   }
 
   /* ---------- toast ---------- */
